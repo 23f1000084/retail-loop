@@ -253,7 +253,7 @@ function navbar() {
       </div>
     </div>
   </nav>`;
-}
+        }
 function layout(content, title = "Circular Commerce") {
   document.title = title;
   document.body.innerHTML =
@@ -268,34 +268,73 @@ function productById(db, id) {
   return db.products.find((p) => String(p.id) === String(id));
 }
 
-function productCard(p, db) {
-  const campaign = db.campaigns.find(
-    (c) => c.productId == p.id && c.status === "Active",
-  );
-  return `<div class="col">
-    <div class="card product-card">
-      <div class="product-image">${p.icon || "📦"}</div>
-      <div class="card-body d-flex flex-column">
-        <div class="d-flex justify-content-between gap-2">
-          <h5 class="card-title mb-1">${esc(p.name)}</h5>
-          <span class="badge badge-soft align-self-start">${esc(p.condition)}</span>
+function productCard(product, viewType = "customer") {
+  const isSales = viewType === "sales";
+
+  return `
+    <div class="col">
+      <div class="card h-100 border-0 shadow-sm">
+
+        <div class="product-image rounded-top">
+          ${product.icon || "📦"}
         </div>
-        <p class="small-muted mb-2">${esc(p.category)}</p>
-        <p class="card-text small flex-grow-1">${esc(p.description)}</p>
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <strong>${money(p.price)}</strong>
-          <span class="small-muted">Stock: ${p.stock}</span>
+
+        <div class="card-body d-flex flex-column">
+
+          <span class="badge badge-soft mb-2 align-self-start">
+            ${esc(product.condition || "Available")}
+          </span>
+
+          <h5 class="card-title">
+            ${esc(product.name || "Unnamed Product")}
+          </h5>
+
+          <p class="small-muted">
+            ${esc(product.category || "General")}
+          </p>
+
+          <p class="small-muted small flex-grow-1">
+            ${esc(product.description || "No description available.")}
+          </p>
+
+          <h5>
+            ${money(Number(product.price || 0))}
+          </h5>
+
+          ${
+            isSales
+              ? `
+                <div class="d-flex gap-2 flex-wrap mt-2">
+                  <button
+                    class="btn btn-sm btn-outline-dark"
+                    onclick="removeSalesProduct('${encodeURIComponent(product.id)}')"
+                  >
+                    Remove
+                  </button>
+
+                  <button
+                    class="btn btn-sm btn-dark"
+                    onclick="createCampaignForProduct('${encodeURIComponent(product.id)}')"
+                  >
+                    Create Campaign
+                  </button>
+                </div>
+              `
+              : `
+                <a
+                  href="product-details.html?id=${encodeURIComponent(product.id)}"
+                  class="btn btn-sm btn-dark"
+                >
+                  View Product
+                </a>
+              `
+          }
+
         </div>
-        <div class="d-flex gap-2">
-          <a class="btn btn-outline-dark btn-sm flex-fill" href="product.html?id=${p.id}">View</a>
-          <button class="btn btn-dark btn-sm flex-fill" onclick="addToCart(${p.id})">Add to cart</button>
-        </div>
-        ${campaign ? `<a class="btn btn-sm btn-outline-secondary mt-2" href="campaign-details.html?id=${campaign.id}">Join group campaign (${campaign.joined}/${campaign.target})</a>` : ""}
       </div>
     </div>
-  </div>`;
-}
-function addToCart(id) {
+  `;
+}function addToCart(id) {
   const db = getDB();
   if (!currentUser()) {
     location.href = "auth.html";
@@ -1212,365 +1251,136 @@ function initSalesDashboard() {
 
   const db = getDB();
 
-  if (!Array.isArray(db.resaleRecords)) {
-    db.resaleRecords = [];
-  }
-
-  const readyForResale = db.resaleRecords.filter(
-    (record) =>
-      record.assignedTo === "Sales Team" &&
-      record.section === "Ready for Resale" &&
-      record.status === "Completed"
+  const recyclingReports = (db.recoveryRequests || []).filter(
+    request =>
+      request.reportStatus === "Sent" &&
+      request.recyclingReport
   );
 
-  const readyToReturn = db.resaleRecords.filter(
-    (record) =>
-      record.assignedTo === "Sales Team" &&
-      record.section === "Ready to Be Sent to Customer" &&
-      record.status === "Completed"
+  const resaleProducts = (db.products || []).filter(
+    product => product.status === "Ready for Resale"
   );
 
-  dashboardShell(
-    "sales",
-    "Sales Team Dashboard",
+  const activeCampaigns = (db.campaigns || []).filter(
+    campaign => campaign.status === "Active"
+  );
+
+  const totalCustomersJoined = activeCampaigns.reduce(
+    (total, campaign) =>
+      total + (campaign.participants || []).length,
+    0
+  );
+
+  layoutWithNav(
     `
-      <div class="alert alert-light border">
-        Manage catalog products, resale inventory, group campaigns and
-        products ready for customer delivery.
-      </div>
+    <div class="mb-4">
+      <span class="small text-uppercase text-secondary">
+        Sales Team
+      </span>
+      <h2>Sales Dashboard</h2>
+      <p class="small-muted">
+        Manage resale products, inventory, customer returns and campaigns.
+      </p>
+    </div>
 
-      <div class="row g-3 mb-4">
-        <div class="col-md-3">
-          <div class="card stat-card p-3">
-            <span class="small-muted">Catalog Products</span>
-            <h3>${db.products.length}</h3>
-          </div>
-        </div>
-
-        <div class="col-md-3">
-          <div class="card stat-card p-3">
-            <span class="small-muted">Active Campaigns</span>
-            <h3>
-              ${db.campaigns.filter((c) => c.status === "Active").length}
-            </h3>
-          </div>
-        </div>
-
-        <div class="col-md-3">
-          <div class="card stat-card p-3">
-            <span class="small-muted">Ready for Resale</span>
-            <h3>${readyForResale.length}</h3>
-          </div>
-        </div>
-
-        <div class="col-md-3">
-          <div class="card stat-card p-3">
-            <span class="small-muted">Ready to Return</span>
-            <h3>${readyToReturn.length}</h3>
-          </div>
+    <div class="row g-3 mb-4">
+      <div class="col-md-3">
+        <div class="card p-3">
+          <div class="small-muted">Recycling Reports</div>
+          <h3>${recyclingReports.length}</h3>
         </div>
       </div>
 
-      <div class="card p-4 mb-4">
-        <h5 class="mb-3">Ready for Resale</h5>
-        <p class="small-muted">
-          Completely refurbished and quality-checked products that can be
-          added to the catalog for resale.
-        </p>
-
-        <div class="table-responsive">
-          <table class="table align-middle">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Request ID</th>
-                <th>Condition</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              ${
-                readyForResale.length
-                  ? readyForResale
-                      .map(
-                        (record) => `
-                          <tr>
-                            <td>
-                              <strong>${esc(record.productName)}</strong>
-                              <div class="small-muted">
-                                Assignment ID: ${esc(record.id)}
-                              </div>
-                            </td>
-
-                            <td>${esc(record.requestId)}</td>
-
-                            <td>${esc(record.condition || "Refurbished")}</td>
-
-                            <td>
-                              <span class="badge bg-success">
-                                ${esc(record.status)}
-                              </span>
-                            </td>
-
-                            <td>
-                              <button
-                                type="button"
-                                class="btn btn-sm btn-dark"
-                                onclick="addResaleProductToCatalog('${encodeURIComponent(
-                                  record.id
-                                )}')"
-                              >
-                                Add to Catalog
-                              </button>
-                            </td>
-                          </tr>
-                        `
-                      )
-                      .join("")
-                  : `
-                    <tr>
-                      <td colspan="5" class="text-center small-muted">
-                        No products ready for resale.
-                      </td>
-                    </tr>
-                  `
-              }
-            </tbody>
-          </table>
+      <div class="col-md-3">
+        <div class="card p-3">
+          <div class="small-muted">Ready for Resale</div>
+          <h3>${resaleProducts.length}</h3>
         </div>
       </div>
 
-      <div class="card p-4 mb-4">
-        <h5 class="mb-3">Ready to Be Sent to Customer</h5>
-        <p class="small-muted">
-          Repaired products that must be returned to the original customer.
-        </p>
-
-        <div class="table-responsive">
-          <table class="table align-middle">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Request ID</th>
-                <th>Customer ID</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              ${
-                readyToReturn.length
-                  ? readyToReturn
-                      .map(
-                        (record) => `
-                          <tr>
-                            <td>
-                              <strong>${esc(record.productName)}</strong>
-                              <div class="small-muted">
-                                Assignment ID: ${esc(record.id)}
-                              </div>
-                            </td>
-
-                            <td>${esc(record.requestId)}</td>
-
-                            <td>${esc(record.customerId || "Not available")}</td>
-
-                            <td>
-                              <span class="badge bg-success">
-                                ${esc(record.status)}
-                              </span>
-                            </td>
-
-                            <td>
-                              <button
-                                type="button"
-                                class="btn btn-sm btn-dark"
-                                onclick="markProductSentToCustomer('${encodeURIComponent(
-                                  record.id
-                                )}')"
-                              >
-                                Sent to Customer
-                              </button>
-                            </td>
-                          </tr>
-                        `
-                      )
-                      .join("")
-                  : `
-                    <tr>
-                      <td colspan="5" class="text-center small-muted">
-                        No repaired products ready for return.
-                      </td>
-                    </tr>
-                  `
-              }
-            </tbody>
-          </table>
+      <div class="col-md-3">
+        <div class="card p-3">
+          <div class="small-muted">Catalog Products</div>
+          <h3>${(db.products || []).length}</h3>
         </div>
       </div>
 
-      <div id="products" class="card p-4 mb-4">
-        <h5>Add Product to Catalog</h5>
-
-        <form id="productForm" class="row g-2">
-          <div class="col-md-6">
-            <input
-              id="newProductName"
-              class="form-control"
-              placeholder="Product name"
-              required
-            >
-          </div>
-
-          <div class="col-md-3">
-            <input
-              id="newProductPrice"
-              type="number"
-              class="form-control"
-              placeholder="Price"
-              required
-            >
-          </div>
-
-          <div class="col-md-3">
-            <input
-              id="newProductStock"
-              type="number"
-              class="form-control"
-              placeholder="Stock"
-              required
-            >
-          </div>
-
-          <div class="col-md-6">
-            <select id="newProductCategory" class="form-select">
-              <option>Electronics</option>
-              <option>Home</option>
-              <option>Furniture</option>
-            </select>
-          </div>
-
-          <div class="col-md-6">
-            <select id="newProductCondition" class="form-select">
-              <option>New</option>
-              <option>Refurbished</option>
-            </select>
-          </div>
-
-          <div class="col-12">
-            <button class="btn btn-dark">Add Product</button>
-          </div>
-        </form>
-
-        <div id="productMsg"></div>
+      <div class="col-md-3">
+        <div class="card p-3">
+          <div class="small-muted">Active Campaigns</div>
+          <h3>${activeCampaigns.length}</h3>
+        </div>
       </div>
+    </div>
 
-      <div id="campaign" class="card p-4">
-        <h5>Create Group Purchase Campaign</h5>
+    <div class="card p-4 mb-4">
+      <h5 class="mb-3">Recycling Reports Received</h5>
 
-        <form id="campaignForm" class="row g-2">
-          <div class="col-md-6">
-            <select id="campaignProduct" class="form-select">
-              ${db.products
-                .map(
-                  (p) =>
-                    `<option value="${p.id}">${esc(p.name)}</option>`
-                )
-                .join("")}
-            </select>
-          </div>
+      ${
+        recyclingReports.length
+          ? `
+            <div class="table-responsive">
+              <table class="table align-middle">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Request ID</th>
+                    <th>Recovered Materials</th>
+                    <th>Quantity</th>
+                    <th>Remarks</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
 
-          <div class="col-md-2">
-            <input
-              id="campaignTarget"
-              type="number"
-              min="2"
-              class="form-control"
-              placeholder="Target"
-              required
-            >
-          </div>
-
-          <div class="col-md-2">
-            <input
-              id="campaignDiscount"
-              type="number"
-              min="1"
-              max="90"
-              class="form-control"
-              placeholder="Discount %"
-              required
-            >
-          </div>
-
-          <div class="col-md-2">
-            <input
-              id="campaignDuration"
-              class="form-control"
-              placeholder="End date"
-              required
-            >
-          </div>
-
-          <div class="col-12">
-            <button class="btn btn-dark">Create Campaign</button>
-          </div>
-        </form>
-
-        <div id="campaignMsg"></div>
-      </div>
-    `
+                <tbody>
+                  ${recyclingReports
+                    .map(
+                      request => `
+                        <tr>
+                          <td>${esc(request.productName || "Unnamed Product")}</td>
+                          <td>${esc(request.id)}</td>
+                          <td>
+                            ${esc(
+                              request.recyclingReport.recoveredMaterials ||
+                                "Not provided"
+                            )}
+                          </td>
+                          <td>
+                            ${esc(
+                              request.recyclingReport.quantity ||
+                                "Not provided"
+                            )}
+                          </td>
+                          <td>
+                            ${esc(
+                              request.recyclingReport.remarks ||
+                                "No remarks"
+                            )}
+                          </td>
+                          <td>
+                            <span class="badge bg-success">
+                              Report Received
+                            </span>
+                          </td>
+                        </tr>
+                      `
+                    )
+                    .join("")}
+                </tbody>
+              </table>
+            </div>
+          `
+          : `
+            <p class="small-muted mb-0">
+              No recycling reports have been received yet.
+            </p>
+          `
+      }
+    </div>
+    `,
+    "Sales Dashboard",
+    salesNav()
   );
-
-  document.getElementById("productForm").onsubmit = (e) => {
-    e.preventDefault();
-
-    db.products.push({
-      id: Date.now(),
-      name: document.getElementById("newProductName").value,
-      price: Number(document.getElementById("newProductPrice").value),
-      stock: Number(document.getElementById("newProductStock").value),
-      category: document.getElementById("newProductCategory").value,
-      condition: document.getElementById("newProductCondition").value,
-      description: "Catalog product",
-      icon: "📦",
-    });
-
-    saveDB(db);
-
-    document.getElementById("productMsg").innerHTML = alertBox(
-      "Product added to catalog."
-    );
-
-    setTimeout(() => location.reload(), 600);
-  };
-
-  document.getElementById("campaignForm").onsubmit = (e) => {
-    e.preventDefault();
-
-    db.campaigns.push({
-      id: Date.now(),
-      productId: Number(document.getElementById("campaignProduct").value),
-      target: Number(document.getElementById("campaignTarget").value),
-      joined: 0,
-      discount: Number(
-        document.getElementById("campaignDiscount").value
-      ),
-      duration: document.getElementById("campaignDuration").value,
-      status: "Active",
-    });
-
-    saveDB(db);
-
-    document.getElementById("campaignMsg").innerHTML = alertBox(
-      "Group campaign created."
-    );
-
-    setTimeout(() => location.reload(), 600);
-  };
 }
 function initMarketingDashboard() {
   if (!requireLogin()) return;
@@ -3463,6 +3273,1256 @@ function initRecyclingCompleted() {
     `
   );
 }
+
+function salesNav() {
+  const user = currentUser();
+
+  return `
+    <nav class="navbar navbar-expand-lg bg-white border-bottom sticky-top">
+      <div class="container">
+
+        <a
+          class="navbar-brand text-dark"
+          href="sales-dashboard.html"
+        >
+          Circular<span class="text-secondary">Commerce</span>
+        </a>
+
+        <button
+          class="navbar-toggler"
+          type="button"
+          data-bs-toggle="collapse"
+          data-bs-target="#salesNav"
+          aria-controls="salesNav"
+          aria-expanded="false"
+          aria-label="Toggle navigation"
+        >
+          <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="salesNav">
+
+          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+
+            <li class="nav-item">
+              <a
+                class="nav-link"
+                href="sales-dashboard.html"
+              >
+                Dashboard
+              </a>
+            </li>
+
+            <li class="nav-item">
+              <a
+                class="nav-link"
+                href="sales-resale.html"
+              >
+                Ready for Resale
+              </a>
+            </li>
+
+            <li class="nav-item">
+              <a
+                class="nav-link"
+                href="sales-return-products.html"
+              >
+                Return Product to Customer
+              </a>
+            </li>
+
+            <li class="nav-item">
+              <a
+                class="nav-link"
+                href="sales-add-product.html"
+              >
+                Add Product
+              </a>
+            </li>
+
+            <li class="nav-item">
+              <a
+                class="nav-link"
+                href="sales-catalog.html"
+              >
+                Product Catalog
+              </a>
+            </li>
+
+            <li class="nav-item">
+              <a
+                class="nav-link"
+                href="sales-campaigns.html"
+              >
+                Campaigns
+              </a>
+            </li>
+
+          </ul>
+
+          <div class="d-flex align-items-center gap-2">
+            <span class="small-muted d-none d-md-inline">
+              Hi, ${esc(user?.name || "Sales Team")}
+            </span>
+
+            <button
+              class="btn btn-sm btn-dark"
+              type="button"
+              onclick="logout()"
+            >
+              Logout
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </nav>
+  `;
+}
+
+function initSalesResale() {
+  if (!requireLogin()) return;
+
+  const db = getDB();
+
+  const resaleRequests = (db.recoveryRequests || []).filter(
+    request =>
+      request.reportStatus === "Sent" &&
+      request.recyclingReport &&
+      request.resaleStatus !== "Added to Inventory"
+  );
+
+  layoutWithNav(
+    `
+    <div class="mb-4">
+      <h2>Ready for Resale</h2>
+      <p class="small-muted">
+        Products received from recovery and recycling operations.
+      </p>
+    </div>
+
+    <div class="card p-4">
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Request ID</th>
+              <th>Recovered Materials</th>
+              <th>Quantity</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${
+              resaleRequests.length
+                ? resaleRequests
+                    .map(
+                      request => `
+                        <tr>
+                          <td>${esc(request.productName || "Unnamed Product")}</td>
+                          <td>${esc(request.id)}</td>
+                          <td>
+                            ${esc(
+                              request.recyclingReport.recoveredMaterials ||
+                                "Not provided"
+                            )}
+                          </td>
+                          <td>
+                            ${esc(
+                              request.recyclingReport.quantity ||
+                                "Not provided"
+                            )}
+                          </td>
+                          <td>
+                            <button
+                              class="btn btn-sm btn-dark"
+                              onclick="addRecoveredProductToInventory('${encodeURIComponent(
+                                request.id
+                              )}')"
+                            >
+                              Add to Inventory
+                            </button>
+                          </td>
+                        </tr>
+                      `
+                    )
+                    .join("")
+                : `
+                  <tr>
+                    <td colspan="5" class="text-center small-muted">
+                      No products are ready for resale.
+                    </td>
+                  </tr>
+                `
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+    `,
+    "Ready for Resale",
+    salesNav()
+  );
+}
+function addRecoveredProductToInventory(encodedRequestId) {
+  if (!requireLogin()) return;
+
+  const requestId = decodeURIComponent(encodedRequestId);
+  const db = getDB();
+
+  if (!Array.isArray(db.products)) {
+    db.products = [];
+  }
+
+  const request = (db.recoveryRequests || []).find(
+    item => String(item.id) === String(requestId)
+  );
+
+  if (!request) {
+    alert("Recovery request not found.");
+    return;
+  }
+
+  const report = request.recyclingReport || {};
+
+  const productName = prompt(
+    "Enter the product name:",
+    request.productName || ""
+  );
+
+  if (!productName) return;
+
+  const sellingPrice = prompt("Enter selling price:");
+
+  if (!sellingPrice || Number.isNaN(Number(sellingPrice))) {
+    alert("Please enter a valid selling price.");
+    return;
+  }
+
+  const product = {
+    id: `PROD-${Date.now()}`,
+    sourceRequestId: request.id,
+    name: productName,
+    description: request.description || "",
+    condition: "Refurbished",
+    recoveredMaterials: report.recoveredMaterials || "",
+    recoveredQuantity: report.quantity || "",
+    remarks: report.remarks || "",
+    price: Number(sellingPrice),
+    status: "Available",
+    createdAt: new Date().toLocaleString(),
+    createdBy: currentUser().id
+  };
+
+  db.products.push(product);
+
+  request.resaleStatus = "Added to Inventory";
+  request.status = "Product Added to Inventory";
+
+  saveDB(db);
+
+  alert("Product added to inventory successfully.");
+  window.location.href = "sales-catalog.html";
+}
+function initSalesReturnProducts() {
+  if (!requireLogin()) return;
+
+  const db = getDB();
+
+  const returnProducts = (db.recoveryRequests || []).filter(
+    request =>
+      request.recoveryOption === "Repair and Get Back" &&
+      request.repairStatus === "Ready to Return"
+  );
+
+  layoutWithNav(
+    `
+    <div class="mb-4">
+      <h2>Return Product to Customer</h2>
+      <p class="small-muted">
+        Send repaired products back to their original customers.
+      </p>
+    </div>
+
+    <div class="card p-4">
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Customer</th>
+              <th>Request ID</th>
+              <th>Repair Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${
+              returnProducts.length
+                ? returnProducts
+                    .map(
+                      request => `
+                        <tr>
+                          <td>${esc(request.productName || "Unnamed Product")}</td>
+                          <td>${esc(request.customerName || "Not available")}</td>
+                          <td>${esc(request.id)}</td>
+                          <td>${esc(request.repairStatus)}</td>
+                          <td>
+                            <button
+                              class="btn btn-sm btn-primary"
+                              onclick="sendRepairedProductToCustomer('${encodeURIComponent(
+                                request.id
+                              )}')"
+                            >
+                              Send to Customer
+                            </button>
+                          </td>
+                        </tr>
+                      `
+                    )
+                    .join("")
+                : `
+                  <tr>
+                    <td colspan="5" class="text-center small-muted">
+                      No repaired products are ready to return.
+                    </td>
+                  </tr>
+                `
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+    `,
+    "Return Product to Customer",
+    salesNav()
+  );
+}
+function initSalesAddProduct() {
+  if (!requireLogin()) return;
+
+  layoutWithNav(
+    `
+    <div class="mb-4">
+      <h2>Add Product to Inventory</h2>
+      <p class="small-muted">
+        Enter complete product details before adding it to the catalog.
+      </p>
+    </div>
+
+    <div class="card p-4">
+      <form id="addProductForm">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Product Name</label>
+            <input id="productName" class="form-control" required>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Category</label>
+            <input id="productCategory" class="form-control" required>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Condition</label>
+            <select id="productCondition" class="form-select" required>
+              <option value="">Select condition</option>
+              <option value="New">New</option>
+              <option value="Refurbished">Refurbished</option>
+              <option value="Recovered">Recovered</option>
+              <option value="Used">Used</option>
+            </select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Price</label>
+            <input
+              id="productPrice"
+              type="number"
+              min="0"
+              class="form-control"
+              required
+            >
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Stock Quantity</label>
+            <input
+              id="productStock"
+              type="number"
+              min="1"
+              class="form-control"
+              required
+            >
+          </div>
+
+          <div class="col-12">
+            <label class="form-label">Description</label>
+            <textarea
+              id="productDescription"
+              class="form-control"
+              rows="4"
+              required
+            ></textarea>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label">Recovered Materials</label>
+            <textarea
+              id="productRecoveredMaterials"
+              class="form-control"
+              rows="3"
+            ></textarea>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-dark mt-4">
+          Add Product
+        </button>
+
+        <div id="addProductAlert" class="mt-3"></div>
+      </form>
+    </div>
+    `,
+    "Add Product",
+    salesNav()
+  );
+
+  document
+    .getElementById("addProductForm")
+    .addEventListener("submit", event => {
+      event.preventDefault();
+
+      const db = getDB();
+
+      if (!Array.isArray(db.products)) {
+        db.products = [];
+      }
+
+      const product = {
+        id: `PROD-${Date.now()}`,
+        name: document.getElementById("productName").value.trim(),
+        category: document.getElementById("productCategory").value.trim(),
+        condition: document.getElementById("productCondition").value,
+        price: Number(document.getElementById("productPrice").value),
+        stock: Number(document.getElementById("productStock").value),
+        description: document
+          .getElementById("productDescription")
+          .value.trim(),
+        recoveredMaterials: document
+          .getElementById("productRecoveredMaterials")
+          .value.trim(),
+        status: "Available",
+        createdAt: new Date().toLocaleString(),
+        createdBy: currentUser().id
+      };
+
+      db.products.push(product);
+      saveDB(db);
+
+      document.getElementById("addProductAlert").innerHTML =
+        alertBox("Product added to inventory successfully.", "success");
+
+      document.getElementById("addProductForm").reset();
+    });
+}
+function initSalesCatalog() {
+  if (!requireLogin()) return;
+
+  const user = currentUser();
+
+  if (!user || user.role !== "sales") {
+    alert("Only Sales Team can access this page.");
+    location.href = roleHome(user?.role || "customer");
+    return;
+  }
+
+  const db = getDB();
+
+  if (!Array.isArray(db.products)) {
+    db.products = [];
+  }
+
+  layoutWithNav(
+    `
+      <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+        <div>
+          <h2>Product Catalog</h2>
+          <p class="small-muted mb-0">
+            Manage products available for resale and group campaigns.
+          </p>
+        </div>
+
+        <a href="sales-add-product.html" class="btn btn-dark">
+          Add Product
+        </a>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-8">
+          <input
+            id="salesSearch"
+            class="form-control"
+            placeholder="Search products..."
+          >
+        </div>
+
+        <div class="col-md-4">
+          <select id="salesCategory" class="form-select">
+            <option value="">All categories</option>
+            <option>Electronics</option>
+            <option>Home</option>
+            <option>Furniture</option>
+            <option>Recovered Product</option>
+          </select>
+        </div>
+      </div>
+
+      <div
+        id="salesProductGrid"
+        class="row row-cols-1 row-cols-md-2 row-cols-lg-4 g-4"
+      ></div>
+    `,
+    "Product Catalog",
+    salesNav()
+  );
+
+  const searchInput = document.getElementById("salesSearch");
+  const categorySelect = document.getElementById("salesCategory");
+  const productGrid = document.getElementById("salesProductGrid");
+
+ function renderSalesProducts() {
+  const searchText = searchInput.value.trim().toLowerCase();
+  const category = categorySelect.value;
+
+  const products = db.products.filter((product) => {
+    const productName = String(product.name || "").toLowerCase();
+
+    return (
+      (!searchText || productName.includes(searchText)) &&
+      (!category || product.category === category)
+    );
+  });
+
+  productGrid.innerHTML = products.length
+    ? products
+        .map((product) => {
+          return productCard(product, "sales");
+        })
+        .join("")
+    : `
+        <div class="col-12">
+          <div class="empty-state">
+            <h5>No products found</h5>
+            <p class="small-muted mb-0">
+              Add products to display them in the catalog.
+            </p>
+          </div>
+        </div>
+      `;
+}
+
+  searchInput.addEventListener("input", renderSalesProducts);
+  categorySelect.addEventListener("change", renderSalesProducts);
+
+  renderSalesProducts();
+}
+function createCampaignForProduct(encodedProductId) {
+  if (!requireLogin()) return;
+
+  const productId = decodeURIComponent(encodedProductId);
+  const db = getDB();
+
+  const product = (db.products || []).find(
+    item => String(item.id) === String(productId)
+  );
+
+  if (!product) {
+    alert("Product not found.");
+    return;
+  }
+
+  const title = prompt(
+    "Enter campaign title:",
+    `Group Discount - ${product.name}`
+  );
+
+  if (!title) return;
+
+  const description = prompt(
+    "Enter campaign description:",
+    `Join with other customers and receive a discount on ${product.name}.`
+  );
+
+  if (!description) return;
+
+  const requiredParticipants = Number(
+    prompt("Enter required number of customers:", "5")
+  );
+
+  if (
+    !requiredParticipants ||
+    requiredParticipants < 2 ||
+    Number.isNaN(requiredParticipants)
+  ) {
+    alert("Please enter a valid group size.");
+    return;
+  }
+
+  const discountPercentage = Number(
+    prompt("Enter discount percentage:", "10")
+  );
+
+  if (
+    Number.isNaN(discountPercentage) ||
+    discountPercentage <= 0 ||
+    discountPercentage >= 100
+  ) {
+    alert("Please enter a valid discount percentage.");
+    return;
+  }
+
+  const startDate = prompt("Enter campaign start date: YYYY-MM-DD");
+  const endDate = prompt("Enter campaign end date: YYYY-MM-DD");
+
+  if (!startDate || !endDate) return;
+
+  if (!Array.isArray(db.campaigns)) {
+    db.campaigns = [];
+  }
+
+  const campaign = {
+    id: `CAMP-${Date.now()}`,
+    productId: product.id,
+    productName: product.name,
+    title,
+    description,
+    requiredParticipants,
+    discountPercentage,
+    originalPrice: Number(product.price),
+    discountedPrice:
+      Number(product.price) -
+      Number(product.price) * (discountPercentage / 100),
+    startDate,
+    endDate,
+    participants: [],
+    status: "Active",
+    createdBy: currentUser().id,
+    createdAt: new Date().toLocaleString()
+  };
+
+  db.campaigns.push(campaign);
+  saveDB(db);
+
+  alert("Group purchase campaign created successfully.");
+  window.location.href = "sales-campaigns.html";
+}
+function initSalesCampaigns() {
+  if (!requireLogin()) return;
+
+  const db = getDB();
+
+  if (!Array.isArray(db.campaigns)) {
+    db.campaigns = [];
+  }
+
+  layoutWithNav(
+    `
+    <div class="mb-4">
+      <h2>Group Purchase Campaigns</h2>
+      <p class="small-muted">
+        View campaigns and track customers who joined each campaign.
+      </p>
+    </div>
+
+    <div class="row g-4">
+      ${
+        db.campaigns.length
+          ? db.campaigns
+              .map(campaign => {
+                const participants = campaign.participants || [];
+                const joinedCount = participants.length;
+                const remaining = Math.max(
+                  Number(campaign.requiredParticipants || 0) -
+                    joinedCount,
+                  0
+                );
+
+                return `
+                  <div class="col-md-6">
+                    <div class="card p-4 h-100">
+                      <div class="d-flex justify-content-between gap-2">
+                        <h5>${esc(campaign.title)}</h5>
+                        <span class="badge ${
+                          campaign.status === "Active"
+                            ? "bg-success"
+                            : "bg-secondary"
+                        }">
+                          ${esc(campaign.status)}
+                        </span>
+                      </div>
+
+                      <p class="small-muted">
+                        Product: ${esc(campaign.productName)}
+                      </p>
+
+                      <p>${esc(campaign.description)}</p>
+
+                      <p>
+                        <strong>Original Price:</strong>
+                        ₹${esc(campaign.originalPrice)}
+                      </p>
+
+                      <p>
+                        <strong>Discounted Price:</strong>
+                        ₹${esc(
+                          Number(campaign.discountedPrice).toFixed(2)
+                        )}
+                      </p>
+
+                      <p>
+                        <strong>Required Participants:</strong>
+                        ${esc(campaign.requiredParticipants)}
+                      </p>
+
+                      <p>
+                        <strong>Customers Joined:</strong>
+                        ${joinedCount}
+                      </p>
+
+                      <p>
+                        <strong>Remaining Participants:</strong>
+                        ${remaining}
+                      </p>
+
+                      <p>
+                        <strong>Campaign Period:</strong><br>
+                        ${esc(campaign.startDate)} to
+                        ${esc(campaign.endDate)}
+                      </p>
+
+                      <div class="d-flex gap-2 flex-wrap mt-auto">
+                        <button
+                          class="btn btn-sm btn-primary"
+                          onclick="viewCampaignParticipants('${encodeURIComponent(
+                            campaign.id
+                          )}')"
+                        >
+                          View Joined Customers
+                        </button>
+
+                        ${
+                          campaign.status === "Active"
+                            ? `
+                              <button
+                                class="btn btn-sm btn-outline-danger"
+                                onclick="closeCampaign('${encodeURIComponent(
+                                  campaign.id
+                                )}')"
+                              >
+                                Close Campaign
+                              </button>
+                            `
+                            : ""
+                        }
+                      </div>
+                    </div>
+                  </div>
+                `;
+              })
+              .join("")
+          : `
+            <div class="col-12">
+              <div class="alert alert-info">
+                No campaigns have been created yet.
+              </div>
+            </div>
+          `
+      }
+    </div>
+    `,
+    "Campaigns",
+    salesNav()
+  );
+}
+function viewCampaignParticipants(encodedCampaignId) {
+  if (!requireLogin()) return;
+
+  const campaignId = decodeURIComponent(encodedCampaignId);
+  const db = getDB();
+
+  const campaign = (db.campaigns || []).find(
+    item => String(item.id) === String(campaignId)
+  );
+
+  if (!campaign) {
+    alert("Campaign not found.");
+    return;
+  }
+
+  const participants = campaign.participants || [];
+
+  layoutWithNav(
+    `
+    <div class="mb-4">
+      <a
+        href="sales-campaigns.html"
+        class="btn btn-outline-dark mb-3"
+      >
+        Back to Campaigns
+      </a>
+
+      <h2>Joined Customers</h2>
+      <p class="small-muted">
+        Campaign: ${esc(campaign.title)}
+      </p>
+    </div>
+
+    <div class="card p-4">
+      ${
+        participants.length
+          ? `
+            <div class="table-responsive">
+              <table class="table align-middle">
+                <thead>
+                  <tr>
+                    <th>Customer Name</th>
+                    <th>Customer ID</th>
+                    <th>Joined At</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  ${participants
+                    .map(
+                      participant => `
+                        <tr>
+                          <td>${esc(participant.name || "Unknown")}</td>
+                          <td>${esc(participant.customerId || "Not available")}</td>
+                          <td>${esc(participant.joinedAt || "Not available")}</td>
+                          <td>
+                            <span class="badge bg-success">
+                              Joined
+                            </span>
+                          </td>
+                        </tr>
+                      `
+                    )
+                    .join("")}
+                </tbody>
+              </table>
+            </div>
+          `
+          : `
+            <p class="small-muted mb-0">
+              No customers have joined this campaign yet.
+            </p>
+          `
+      }
+    </div>
+    `,
+    "Joined Customers",
+    salesNav()
+  );
+}
+function closeCampaign(encodedCampaignId) {
+  if (!requireLogin()) return;
+
+  const campaignId = decodeURIComponent(encodedCampaignId);
+  const db = getDB();
+
+  const campaign = (db.campaigns || []).find(
+    item => String(item.id) === String(campaignId)
+  );
+
+  if (!campaign) {
+    alert("Campaign not found.");
+    return;
+  }
+
+  const confirmed = confirm(
+    `Close campaign "${campaign.title}"?`
+  );
+
+  if (!confirmed) return;
+
+  campaign.status = "Closed";
+  campaign.closedAt = new Date().toLocaleString();
+
+  saveDB(db);
+
+  alert("Campaign closed successfully.");
+  initSalesCampaigns();
+}
+function createCampaignForProduct(encodedProductId) {
+  if (!requireLogin()) return;
+
+  const user = currentUser();
+
+  if (!user || user.role !== "sales") {
+    alert("Only Sales Team can create campaigns.");
+    return;
+  }
+
+  const productId = decodeURIComponent(encodedProductId);
+  const db = getDB();
+
+  const product = db.products.find(
+    (item) => String(item.id) === String(productId)
+  );
+
+  if (!product) {
+    alert("Product not found.");
+    return;
+  }
+
+  window.location.href =
+    `sales-create-campaign.html?productId=${encodeURIComponent(product.id)}`;
+}
+
+function initSalesCreateCampaign() {
+  if (!requireLogin()) return;
+
+  const user = currentUser();
+
+  if (!user || user.role !== "sales") {
+    alert("Only Sales Team can create campaigns.");
+    window.location.href = roleHome(user?.role || "customer");
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const productId = params.get("productId");
+
+  const db = getDB();
+
+  if (!Array.isArray(db.products)) {
+    db.products = [];
+  }
+
+  if (!Array.isArray(db.campaigns)) {
+    db.campaigns = [];
+  }
+
+  const product = db.products.find(
+    (item) => String(item.id) === String(productId)
+  );
+
+  if (!product) {
+    layoutWithNav(
+      `
+        <div class="alert alert-danger">
+          Product not found.
+        </div>
+
+        <a href="sales-catalog.html" class="btn btn-dark">
+          Back to Product Catalog
+        </a>
+      `,
+      "Create Campaign",
+      salesNav()
+    );
+
+    return;
+  }
+
+  layoutWithNav(
+    `
+      <div class="mb-4">
+        <h2>Create Group Purchase Campaign</h2>
+        <p class="small-muted mb-0">
+          Create a group discount campaign for the selected product.
+        </p>
+      </div>
+
+      <div class="card border-0 shadow-sm">
+        <div class="card-body p-4">
+
+          <form id="createCampaignForm">
+
+            <div class="mb-3">
+              <label for="campaignProductName" class="form-label">
+                Product Name
+              </label>
+
+              <input
+                type="text"
+                id="campaignProductName"
+                class="form-control"
+                value="${esc(product.name || product.productName || "")}"
+                readonly
+              >
+            </div>
+
+            <div class="mb-3">
+              <label for="campaignTitle" class="form-label">
+                Campaign Name
+              </label>
+
+              <input
+                type="text"
+                id="campaignTitle"
+                class="form-control"
+                value="Group Discount - ${esc(product.name || product.productName || "")}"
+                required
+              >
+            </div>
+
+            <div class="row g-3">
+
+              <div class="col-md-6">
+                <label for="originalPrice" class="form-label">
+                  Original Price
+                </label>
+
+                <input
+                  type="number"
+                  id="originalPrice"
+                  class="form-control"
+                  min="1"
+                  step="0.01"
+                  value="${Number(product.price || 0)}"
+                  required
+                >
+              </div>
+
+              <div class="col-md-6">
+                <label for="discountedPrice" class="form-label">
+                  Discounted Price
+                </label>
+
+                <input
+                  type="number"
+                  id="discountedPrice"
+                  class="form-control"
+                  min="1"
+                  step="0.01"
+                  placeholder="Enter discounted price"
+                  required
+                >
+              </div>
+
+              <div class="col-md-6">
+                <label for="targetQuantity" class="form-label">
+                  Target Quantity / Participants
+                </label>
+
+                <input
+                  type="number"
+                  id="targetQuantity"
+                  class="form-control"
+                  min="2"
+                  step="1"
+                  placeholder="Example: 5"
+                  required
+                >
+              </div>
+
+              <div class="col-md-6">
+                <label for="campaignDeadline" class="form-label">
+                  Campaign Deadline
+                </label>
+
+                <input
+                  type="date"
+                  id="campaignDeadline"
+                  class="form-control"
+                  required
+                >
+              </div>
+
+            </div>
+
+            <div class="mb-3 mt-3">
+              <label for="campaignDescription" class="form-label">
+                Campaign Description
+              </label>
+
+              <textarea
+                id="campaignDescription"
+                class="form-control"
+                rows="4"
+                placeholder="Explain the group discount offer..."
+              ></textarea>
+            </div>
+
+            <div id="campaignPricePreview" class="alert alert-light border">
+              Enter the discounted price to calculate the discount.
+            </div>
+
+            <div class="d-flex flex-wrap gap-2 mt-4">
+              <button
+                type="submit"
+                class="btn btn-dark"
+              >
+                Create Campaign
+              </button>
+
+              <a
+                href="sales-catalog.html"
+                class="btn btn-outline-dark"
+              >
+                Cancel
+              </a>
+            </div>
+
+          </form>
+
+        </div>
+      </div>
+    `,
+    "Create Group Purchase Campaign",
+    salesNav()
+  );
+
+  const originalPriceInput = document.getElementById("originalPrice");
+  const discountedPriceInput = document.getElementById("discountedPrice");
+  const pricePreview = document.getElementById("campaignPricePreview");
+
+  function updateDiscountPreview() {
+    const originalPrice = Number(originalPriceInput.value || 0);
+    const discountedPrice = Number(discountedPriceInput.value || 0);
+
+    if (
+      originalPrice <= 0 ||
+      discountedPrice <= 0 ||
+      discountedPrice >= originalPrice
+    ) {
+      pricePreview.innerHTML = `
+        Enter a discounted price lower than the original price.
+      `;
+
+      return;
+    }
+
+    const discountPercentage =
+      ((originalPrice - discountedPrice) / originalPrice) * 100;
+
+    pricePreview.innerHTML = `
+      Discount:
+      <strong>${discountPercentage.toFixed(2)}%</strong>
+      &nbsp; | &nbsp;
+      Customer saves:
+      <strong>${money(originalPrice - discountedPrice)}</strong>
+    `;
+  }
+
+  originalPriceInput.addEventListener("input", updateDiscountPreview);
+  discountedPriceInput.addEventListener("input", updateDiscountPreview);
+
+  document
+    .getElementById("createCampaignForm")
+    .addEventListener("submit", function (event) {
+      event.preventDefault();
+
+      const productName =
+        product.name || product.productName || "Unnamed Product";
+
+      const campaignTitle =
+        document.getElementById("campaignTitle").value.trim();
+
+      const originalPrice = Number(
+        document.getElementById("originalPrice").value
+      );
+
+      const discountedPrice = Number(
+        document.getElementById("discountedPrice").value
+      );
+
+      const targetQuantity = Number(
+        document.getElementById("targetQuantity").value
+      );
+
+      const campaignDeadline =
+        document.getElementById("campaignDeadline").value;
+
+      const campaignDescription =
+        document.getElementById("campaignDescription").value.trim();
+
+      if (!campaignTitle) {
+        alert("Please enter a campaign name.");
+        return;
+      }
+
+      if (originalPrice <= 0) {
+        alert("Original price must be greater than zero.");
+        return;
+      }
+
+      if (discountedPrice <= 0) {
+        alert("Discounted price must be greater than zero.");
+        return;
+      }
+
+      if (discountedPrice >= originalPrice) {
+        alert("Discounted price must be lower than the original price.");
+        return;
+      }
+
+      if (targetQuantity < 2) {
+        alert("Target quantity must be at least 2 participants.");
+        return;
+      }
+
+      if (!campaignDeadline) {
+        alert("Please select a campaign deadline.");
+        return;
+      }
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const deadlineDate = new Date(`${campaignDeadline}T00:00:00`);
+
+      if (deadlineDate < today) {
+        alert("Campaign deadline cannot be in the past.");
+        return;
+      }
+
+      const discountPercentage =
+        ((originalPrice - discountedPrice) / originalPrice) * 100;
+
+      const campaign = {
+        id: `CAMP-${Date.now()}`,
+
+        productId: product.id,
+        productName: productName,
+
+        title: campaignTitle,
+        description: campaignDescription,
+
+        originalPrice: originalPrice,
+        discountedPrice: discountedPrice,
+        discountPercentage: Number(discountPercentage.toFixed(2)),
+
+        requiredParticipants: targetQuantity,
+        targetQuantity: targetQuantity,
+
+        participants: [],
+
+        startDate: new Date().toISOString().split("T")[0],
+        endDate: campaignDeadline,
+
+        status: "Active",
+
+        createdBy: user.id,
+        createdByName: user.name,
+        createdAt: new Date().toLocaleString()
+      };
+
+      db.campaigns.push(campaign);
+
+      saveDB(db);
+
+      alert("Group purchase campaign created successfully.");
+
+      window.location.href = "sales-campaigns.html";
+    });
+}
 document.addEventListener("DOMContentLoaded", () => {
   const page = document.body.dataset.page;
   (
@@ -3489,7 +4549,12 @@ serviceRecycling: initServiceRecycling,
           recyclingCompleted: initRecyclingCompleted,
 openRecyclingRequest: openRecyclingRequest,
       salesDashboard: initSalesDashboard,
-
+salesResale: initSalesResale,
+  salesReturnProducts: initSalesReturnProducts,
+  salesAddProduct: initSalesAddProduct,
+  salesCatalog: initSalesCatalog,
+  salesCampaigns: initSalesCampaigns,
+  salesCreateCampaign:initSalesCreateCampaign,
       marketingDashboard: initMarketingDashboard,
     })[page] || initHome
   )();
