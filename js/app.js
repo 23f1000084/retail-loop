@@ -145,26 +145,111 @@ function logout() {
 }
 function navbar() {
   const user = currentUser();
+
+  const isRecycling = user && user.role === "recycling";
+
   return `
   <nav class="navbar navbar-expand-lg bg-white border-bottom sticky-top">
     <div class="container">
-      <a class="navbar-brand text-dark" href="index.html">Circular<span class="text-secondary">Commerce</span></a>
-      <button class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#mainNav"><span class="navbar-toggler-icon"></span></button>
+      <a class="navbar-brand text-dark" href="index.html">
+        Circular<span class="text-secondary">Commerce</span>
+      </a>
+
+      <button
+        class="navbar-toggler"
+        data-bs-toggle="collapse"
+        data-bs-target="#mainNav"
+      >
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
       <div class="collapse navbar-collapse" id="mainNav">
+
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-          <li class="nav-item"><a class="nav-link" href="catalog.html">Catalog</a></li>
-          <li class="nav-item"><a class="nav-link" href="campaigns.html">Group Campaigns</a></li>
-          ${user && user.role === "customer" ? `<li class="nav-item"><a class="nav-link" href="recovery.html">Recover a Product</a></li>` : ""}
+
+          ${
+            isRecycling
+              ? `
+                <li class="nav-item">
+                  <a class="nav-link" href="recycling-dashboard.html">
+                    Assigned Work
+                  </a>
+                </li>
+
+                <li class="nav-item">
+                  <a class="nav-link" href="recycling-completed.html">
+                    Completed Work
+                  </a>
+                </li>
+              `
+              : `
+                <li class="nav-item">
+                  <a class="nav-link" href="catalog.html">
+                    Catalog
+                  </a>
+                </li>
+
+                <li class="nav-item">
+                  <a class="nav-link" href="campaigns.html">
+                    Group Campaigns
+                  </a>
+                </li>
+
+                ${
+                  user && user.role === "customer"
+                    ? `
+                      <li class="nav-item">
+                        <a class="nav-link" href="recovery.html">
+                          Recover a Product
+                        </a>
+                      </li>
+                    `
+                    : ""
+                }
+              `
+          }
+
         </ul>
+
         <div class="d-flex align-items-center gap-2">
           ${
             user
-              ? `<span class="small-muted d-none d-md-inline">Hi, ${esc(user.name)}</span>
-          <a class="btn btn-sm btn-outline-dark" href="${roleHome(user.role)}">Dashboard</a>
-          <button class="btn btn-sm btn-dark" onclick="logout()">Logout</button>`
-              : `<a class="btn btn-sm btn-outline-dark" href="auth.html">Login / Register</a>`
+              ? `
+                <span class="small-muted d-none d-md-inline">
+                  Hi, ${esc(user.name)}
+                </span>
+
+                ${
+                  !isRecycling
+                    ? `
+                      <a
+                        class="btn btn-sm btn-outline-dark"
+                        href="${roleHome(user.role)}"
+                      >
+                        Dashboard
+                      </a>
+                    `
+                    : ""
+                }
+
+                <button
+                  class="btn btn-sm btn-dark"
+                  onclick="logout()"
+                >
+                  Logout
+                </button>
+              `
+              : `
+                <a
+                  class="btn btn-sm btn-outline-dark"
+                  href="auth.html"
+                >
+                  Login / Register
+                </a>
+              `
           }
         </div>
+
       </div>
     </div>
   </nav>`;
@@ -302,25 +387,44 @@ function sideMenu(role) {
       ["campaigns.html", "Group Campaigns"],
       ["cart.html", "Cart"],
     ],
+
     service: [
       ["service-dashboard.html", "Dashboard"],
       ["recovery.html", "Recovery Requests"],
     ],
-    recycling: [["recycling-dashboard.html", "Dashboard"]],
+
+    recycling: [
+      ["recycling-dashboard.html", "Assigned Work"],
+      ["recycling-completed.html", "Completed Work"],
+    ],
+
     sales: [
       ["sales-dashboard.html", "Dashboard"],
       ["catalog.html", "Catalog"],
       ["campaigns.html", "Campaigns"],
     ],
+
     marketing: [
       ["marketing-dashboard.html", "Dashboard"],
       ["campaigns.html", "Campaigns"],
       ["catalog.html", "Products"],
     ],
   };
-  return `<div class="card p-3 mb-4"><h6 class="text-uppercase small-muted mb-2">${role} workspace</h6>
-    ${links[role].map((x) => `<a class="sidebar-link" href="${x[0]}">${x[1]}</a>`).join("")}
-  </div>`;
+
+  return `
+    <div class="card p-3 mb-4">
+      <h6 class="text-uppercase small-muted mb-2">
+        ${role} workspace
+      </h6>
+
+      ${links[role]
+        .map(
+          (x) =>
+            `<a class="sidebar-link" href="${x[0]}">${x[1]}</a>`
+        )
+        .join("")}
+    </div>
+  `;
 }
 
 function initHome() {
@@ -595,9 +699,30 @@ function initCampaignDetails() {
   );
 }
 function dashboardShell(role, title, body) {
+  const isRecycling = role === "recycling";
+
   layout(
-    `<div class="row g-4"><div class="col-lg-3">${sideMenu(role)}</div><div class="col-lg-9"><h2 class="mb-4">${title}</h2>${body}</div></div>`,
-    title,
+    `
+      <div class="row g-4">
+
+        ${
+          !isRecycling
+            ? `
+              <div class="col-lg-3">
+                ${sideMenu(role)}
+              </div>
+            `
+            : ""
+        }
+
+        <div class="${isRecycling ? "col-12" : "col-lg-9"}">
+          <h2 class="mb-4">${title}</h2>
+          ${body}
+        </div>
+
+      </div>
+    `,
+    title
   );
 }
 function initCustomerDashboard() {
@@ -981,21 +1106,15 @@ function initRecyclingDashboard() {
     db.recyclingRecords = [];
   }
 
- const assignedWork = db.recyclingRecords.filter(
-  (record) =>
-    record.assignedTo === "Recycling Partner" &&
-    record.status !== "Recycled"
-);
-
-const completedWork = db.recyclingRecords.filter(
-  (record) =>
-    record.assignedTo === "Recycling Partner" &&
-    record.status === "Recycled"
-);
+  const assignedWork = db.recyclingRecords.filter(
+    (record) =>
+      record.assignedTo === "Recycling Partner" &&
+      record.status !== "Recycled"
+  );
 
   dashboardShell(
     "recycling",
-    "Recycling Partner Dashboard",
+    "Assigned Work",
     `
     <div class="alert alert-light border">
       This workspace receives products sent by the service team
@@ -1003,31 +1122,22 @@ const completedWork = db.recyclingRecords.filter(
     </div>
 
     <div class="row g-3 mb-4">
-
-      <div class="col-md-4">
+      <div class="col-md-6">
         <div class="card stat-card p-3">
           <span class="small-muted">Assigned Recycling Work</span>
           <h3>${assignedWork.length}</h3>
         </div>
       </div>
 
-      <div class="col-md-4">
+      <div class="col-md-6">
         <div class="card stat-card p-3">
           <span class="small-muted">Total Recycling Requests</span>
           <h3>${db.recyclingRecords.length}</h3>
         </div>
       </div>
-
-      <div class="col-md-4">
-        <div class="card stat-card p-3">
-          <span class="small-muted">Completed Recycling</span>
-          <h3>${completedWork.length}</h3>
-        </div>
-      </div>
-
     </div>
 
-    <div class="card p-4 mb-4">
+    <div class="card p-4">
       <h5 class="mb-3">Assigned Products for Recycling</h5>
 
       <div class="table-responsive">
@@ -1045,90 +1155,50 @@ const completedWork = db.recyclingRecords.filter(
           <tbody>
             ${
               assignedWork.length
-                ? assignedWork.map(record => `
-                    <tr>
-                      <td>
-                        <strong>${esc(record.productName)}</strong>
-                        <div class="small-muted">
-                          Condition:
-                          ${esc(record.condition || "Not specified")}
-                        </div>
-                      </td>
+                ? assignedWork
+                    .map(
+                      (record) => `
+                <tr>
+                  <td>
+                    <strong>${esc(record.productName)}</strong>
+                    <div class="small-muted">
+                      Condition:
+                      ${esc(record.condition || "Not specified")}
+                    </div>
+                  </td>
 
-                      <td>
-                        ${esc(record.requestId)}
-                      </td>
+                  <td>${esc(record.requestId)}</td>
 
-                      <td>
-                        ${esc(record.id)}
-                      </td>
+                  <td>${esc(record.id)}</td>
 
-                      <td>
-                        <span class="badge badge-soft">
-                          ${esc(record.status)}
-                        </span>
-                      </td>
+                  <td>
+                    <span class="badge badge-soft">
+                      ${esc(record.status)}
+                    </span>
+                  </td>
 
-                      <td>
-                        <button
-                          type="button"
-                          class="btn btn-sm btn-dark"
-                          onclick="openRecyclingRequest('${encodeURIComponent(record.id)}')"
-                        >
-                          Open Assigned Work
-                        </button>
-                      </td>
-                    </tr>
-                  `).join("")
+                  <td>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-dark"
+                      onclick="openRecyclingRequest('${encodeURIComponent(
+                        record.id
+                      )}')"
+                    >
+                      Open Assigned Work
+                    </button>
+                  </td>
+                </tr>
+              `
+                    )
+                    .join("")
                 : `
-                    <tr>
-                      <td colspan="5" class="text-center small-muted">
-                        No products assigned for recycling.
-                      </td>
-                    </tr>
-                  `
-            }
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="card p-4">
-      <h5 class="mb-3">Completed Recycling Records</h5>
-
-      <div class="table-responsive">
-        <table class="table align-middle">
-          <thead>
-            <tr>
-              <th>Product</th>
-              <th>Request ID</th>
-              <th>Status</th>
-              <th>Materials Recovered</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            ${
-              completedWork.length
-                ? completedWork.map(record => `
-                    <tr>
-                      <td>${esc(record.productName)}</td>
-                      <td>${esc(record.requestId)}</td>
-                      <td>
-                        <span class="badge bg-success">
-                          ${esc(record.status)}
-                        </span>
-                      </td>
-                      <td>${esc(record.materials || "Not specified")}</td>
-                    </tr>
-                  `).join("")
-                : `
-                    <tr>
-                      <td colspan="4" class="text-center small-muted">
-                        No completed recycling records.
-                      </td>
-                    </tr>
-                  `
+                <tr>
+                  <td colspan="5" class="text-center small-muted">
+                    No products assigned for recycling.
+                  </td>
+                </tr>
+              `
             }
           </tbody>
         </table>
@@ -3311,6 +3381,88 @@ function initServiceRecycling() {
   );
 }
 
+function initRecyclingCompleted() {
+  if (!requireLogin()) return;
+
+  const db = getDB();
+
+  if (!Array.isArray(db.recyclingRecords)) {
+    db.recyclingRecords = [];
+  }
+
+  const completedWork = db.recyclingRecords.filter(
+    (record) =>
+      record.assignedTo === "Recycling Partner" &&
+      record.status === "Recycled"
+  );
+
+  dashboardShell(
+    "recycling",
+    "Completed Work",
+    `
+    <div class="alert alert-light border">
+      View recycling work that has already been completed
+      and the materials recovered from each product.
+    </div>
+
+    <div class="card p-4">
+      <h5 class="mb-3">Completed Recycling Work</h5>
+
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Request ID</th>
+              <th>Status</th>
+              <th>Materials Recovered</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${
+              completedWork.length
+                ? completedWork
+                    .map(
+                      (record) => `
+                <tr>
+                  <td>
+                    <strong>${esc(record.productName)}</strong>
+                    <div class="small-muted">
+                      Assignment ID: ${esc(record.id)}
+                    </div>
+                  </td>
+
+                  <td>${esc(record.requestId)}</td>
+
+                  <td>
+                    <span class="badge bg-success">
+                      ${esc(record.status)}
+                    </span>
+                  </td>
+
+                  <td>
+                    ${esc(record.materials || "Not specified")}
+                  </td>
+                </tr>
+              `
+                    )
+                    .join("")
+                : `
+                <tr>
+                  <td colspan="4" class="text-center small-muted">
+                    No completed recycling records.
+                  </td>
+                </tr>
+              `
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+    `
+  );
+}
 document.addEventListener("DOMContentLoaded", () => {
   const page = document.body.dataset.page;
   (
@@ -3334,6 +3486,7 @@ document.addEventListener("DOMContentLoaded", () => {
 serviceRecycling: initServiceRecycling,
           qualityCheck: initQualityCheck,
           recyclingDashboard: initRecyclingDashboard,
+          recyclingCompleted: initRecyclingCompleted,
 openRecyclingRequest: openRecyclingRequest,
       salesDashboard: initSalesDashboard,
 
