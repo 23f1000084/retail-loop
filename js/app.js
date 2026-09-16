@@ -76,6 +76,7 @@ const defaultDB = {
   refurbishments: [],
   qualityChecks: [],
   recyclingRecords: [],
+  resaleRecords: [],
   promotions: [],
   cart: [],
 };
@@ -746,6 +747,79 @@ function initServiceRequest() {
     return;
   }
 
+  /*
+    Once the service team has finalized the request,
+    Service Actions should no longer be visible.
+  */
+  const isFinalized =
+    request.finalDestination === "resale" ||
+    request.finalDestination === "recycling" ||
+    request.status === "Ready for Resale" ||
+    request.status === "Ready to Be Sent to Customer" ||
+    request.status === "Sent to Customer" ||
+    request.status === "Sent to Recycling Partner";
+
+  /*
+    Show Service Actions only for active service requests.
+    For finalized requests, this becomes an empty string.
+  */
+  const serviceActionsHtml = !isFinalized
+    ? `
+      <div class="card p-4 mb-4">
+        <h5 class="mb-3">Service Actions</h5>
+
+        <div class="row g-3">
+          <div class="col-md-4">
+            <a
+              href="assessment.html?requestId=${encodeURIComponent(request.id)}"
+              class="btn btn-dark w-100"
+            >
+              Create Assessment Record
+            </a>
+          </div>
+
+          <div class="col-md-4">
+            <a
+              href="service-record.html?requestId=${encodeURIComponent(request.id)}"
+              class="btn btn-outline-dark w-100"
+            >
+              Repair / Refurbishment Record
+            </a>
+          </div>
+
+          <div class="col-md-4">
+            <a
+              href="quality-check.html?requestId=${encodeURIComponent(request.id)}"
+              class="btn btn-outline-dark w-100"
+            >
+              Create Quality Check Record
+            </a>
+          </div>
+
+          <div class="col-md-6">
+            <button
+              type="button"
+              class="btn btn-outline-danger w-100"
+              onclick="sendToRecycling('${encodeURIComponent(request.id)}')"
+            >
+              Send to Recycling
+            </button>
+          </div>
+
+          <div class="col-md-6">
+            <button
+              type="button"
+              class="btn btn-outline-success w-100"
+              onclick="sendToResaleOrReturn('${encodeURIComponent(request.id)}')"
+            >
+              Send to Resale / Return
+            </button>
+          </div>
+        </div>
+      </div>
+    `
+    : "";
+
   layoutWithNav(
     `
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -801,100 +875,630 @@ function initServiceRequest() {
       </p>
     </div>
 
-    <div class="card p-4">
-      <h5 class="mb-3">Service Actions</h5>
+    ${serviceActionsHtml}
 
-      <div class="row g-3">
-        <div class="col-md-4">
-          <a
-            href="assessment.html?requestId=${encodeURIComponent(request.id)}"
-            class="btn btn-dark w-100"
-          >
-            Create Assessment Record
-          </a>
-        </div>
-
-        <div class="col-md-4">
-          <a
-            href="service-record.html?requestId=${encodeURIComponent(request.id)}"
-            class="btn btn-outline-dark w-100"
-          >
-            Repair / Refurbishment Record
-          </a>
-        </div>
-
-        <div class="col-md-4">
-          <a
-            href="quality-check.html?requestId=${encodeURIComponent(request.id)}"
-            class="btn btn-outline-dark w-100"
-          >
-            Create Quality Check Record
-          </a>
-        </div>
-      </div>
-    </div>
+    ${renderServiceReports(db, request)}
     `,
     "Recovery Request Details",
     serviceNav()
   );
 }
+
+function renderServiceReports(db, request) {
+  const assessment = db.assessments.find(
+    (record) => String(record.requestId) === String(request.id)
+  );
+
+  const serviceRecord = [
+    ...(db.repairs || []),
+    ...(db.refurbishments || [])
+  ].find(
+    (record) => String(record.requestId) === String(request.id)
+  );
+
+  const qualityCheck = db.qualityChecks.find(
+    (record) => String(record.requestId) === String(request.id)
+  );
+
+  const reportValue = (value) => {
+    if (value === null || value === undefined || value === "") {
+      return "Not available";
+    }
+
+    if (typeof value === "object") {
+      return `<pre class="small mb-0">${esc(
+        JSON.stringify(value, null, 2)
+      )}</pre>`;
+    }
+
+    return esc(value);
+  };
+
+  const renderReport = (title, record, emptyMessage) => {
+    if (!record) {
+      return `
+        <div class="border rounded p-3 mb-3">
+          <h6>${title}</h6>
+          <p class="small-muted mb-0">${emptyMessage}</p>
+        </div>
+      `;
+    }
+
+    const fields = Object.entries(record)
+      .filter(([key]) => key !== "id" && key !== "requestId")
+      .map(([key, value]) => {
+        return `
+          <div class="row mb-2">
+            <div class="col-md-4">
+              <strong>${esc(key)}</strong>
+            </div>
+            <div class="col-md-8">
+              ${reportValue(value)}
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    return `
+      <div class="border rounded p-3 mb-3">
+        <h6>${title}</h6>
+        ${fields}
+      </div>
+    `;
+  };
+
+  return `
+    <div class="card p-4 mt-4">
+      <h5 class="mb-3">Process Reports</h5>
+
+      ${renderReport(
+        "Assessment Report",
+        assessment,
+        "Assessment report has not been created yet."
+      )}
+
+      ${renderReport(
+        "Repair / Refurbishment Record",
+        serviceRecord,
+        "Repair or refurbishment record has not been created yet."
+      )}
+
+      ${renderReport(
+        "Quality Check Report",
+        qualityCheck,
+        "Quality-check report has not been created yet."
+      )}
+    </div>
+  `;
+}
 function initRecyclingDashboard() {
   if (!requireLogin()) return;
+
   const db = getDB();
+
+  if (!Array.isArray(db.recyclingRecords)) {
+    db.recyclingRecords = [];
+  }
+
+ const assignedWork = db.recyclingRecords.filter(
+  (record) =>
+    record.assignedTo === "Recycling Partner" &&
+    record.status !== "Recycled"
+);
+
+const completedWork = db.recyclingRecords.filter(
+  (record) =>
+    record.assignedTo === "Recycling Partner" &&
+    record.status === "Recycled"
+);
+
   dashboardShell(
     "recycling",
     "Recycling Partner Dashboard",
-    `<div class="alert alert-light border">This workspace receives products with insufficient recovery potential and records material recovery and recycling.</div><div class="row g-3 mb-4"><div class="col-md-4"><div class="card stat-card p-3"><span class="small-muted">Assigned Products</span><h3>${db.recyclingRecords.length}</h3></div></div><div class="col-md-4"><div class="card stat-card p-3"><span class="small-muted">Recovery Reports</span><h3>${db.recyclingRecords.length}</h3></div></div><div class="col-md-4"><div class="card stat-card p-3"><span class="small-muted">Completed Recycling</span><h3>${db.recyclingRecords.filter((r) => r.status === "Recycled").length}</h3></div></div></div><div id="records" class="card p-4"><h5>Create Recycling Report</h5><form id="recyclingForm" class="row g-2"><div class="col-md-6"><input id="recyclingProduct" class="form-control" placeholder="Assigned product/request ID" required></div><div class="col-md-6"><select id="recyclingStatus" class="form-select"><option>Received</option><option>Material recovered</option><option>Recycled</option></select></div><div class="col-12"><textarea id="recyclingMaterials" class="form-control" placeholder="Useful parts/materials recovered" required></textarea></div><div class="col-12"><button class="btn btn-dark">Save Recycling Report</button></div></form><div id="recyclingMsg"></div></div>`,
+    `
+    <div class="alert alert-light border">
+      This workspace receives products sent by the service team
+      for recycling and material recovery.
+    </div>
+
+    <div class="row g-3 mb-4">
+
+      <div class="col-md-4">
+        <div class="card stat-card p-3">
+          <span class="small-muted">Assigned Recycling Work</span>
+          <h3>${assignedWork.length}</h3>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="card stat-card p-3">
+          <span class="small-muted">Total Recycling Requests</span>
+          <h3>${db.recyclingRecords.length}</h3>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="card stat-card p-3">
+          <span class="small-muted">Completed Recycling</span>
+          <h3>${completedWork.length}</h3>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="card p-4 mb-4">
+      <h5 class="mb-3">Assigned Products for Recycling</h5>
+
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Recovery Request ID</th>
+              <th>Assignment ID</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${
+              assignedWork.length
+                ? assignedWork.map(record => `
+                    <tr>
+                      <td>
+                        <strong>${esc(record.productName)}</strong>
+                        <div class="small-muted">
+                          Condition:
+                          ${esc(record.condition || "Not specified")}
+                        </div>
+                      </td>
+
+                      <td>
+                        ${esc(record.requestId)}
+                      </td>
+
+                      <td>
+                        ${esc(record.id)}
+                      </td>
+
+                      <td>
+                        <span class="badge badge-soft">
+                          ${esc(record.status)}
+                        </span>
+                      </td>
+
+                      <td>
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-dark"
+                          onclick="openRecyclingRequest('${encodeURIComponent(record.id)}')"
+                        >
+                          Open Assigned Work
+                        </button>
+                      </td>
+                    </tr>
+                  `).join("")
+                : `
+                    <tr>
+                      <td colspan="5" class="text-center small-muted">
+                        No products assigned for recycling.
+                      </td>
+                    </tr>
+                  `
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card p-4">
+      <h5 class="mb-3">Completed Recycling Records</h5>
+
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Request ID</th>
+              <th>Status</th>
+              <th>Materials Recovered</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${
+              completedWork.length
+                ? completedWork.map(record => `
+                    <tr>
+                      <td>${esc(record.productName)}</td>
+                      <td>${esc(record.requestId)}</td>
+                      <td>
+                        <span class="badge bg-success">
+                          ${esc(record.status)}
+                        </span>
+                      </td>
+                      <td>${esc(record.materials || "Not specified")}</td>
+                    </tr>
+                  `).join("")
+                : `
+                    <tr>
+                      <td colspan="4" class="text-center small-muted">
+                        No completed recycling records.
+                      </td>
+                    </tr>
+                  `
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+    `
   );
-  document.getElementById("recyclingForm").onsubmit = (e) => {
-    e.preventDefault();
-    db.recyclingRecords.push({
-      id: uid("REC-"),
-      productId: recyclingProduct.value,
-      status: recyclingStatus.value,
-      materials: recyclingMaterials.value,
-    });
-    saveDB(db);
-    recyclingMsg.innerHTML = alertBox("Recycling report saved.");
-  };
 }
 function initSalesDashboard() {
   if (!requireLogin()) return;
+
   const db = getDB();
+
+  if (!Array.isArray(db.resaleRecords)) {
+    db.resaleRecords = [];
+  }
+
+  const readyForResale = db.resaleRecords.filter(
+    (record) =>
+      record.assignedTo === "Sales Team" &&
+      record.section === "Ready for Resale" &&
+      record.status === "Completed"
+  );
+
+  const readyToReturn = db.resaleRecords.filter(
+    (record) =>
+      record.assignedTo === "Sales Team" &&
+      record.section === "Ready to Be Sent to Customer" &&
+      record.status === "Completed"
+  );
+
   dashboardShell(
     "sales",
     "Sales Team Dashboard",
-    `<div class="alert alert-light border">Manage catalog products, inventory and group purchase campaigns from creation to completion.</div><div class="row g-3 mb-4"><div class="col-md-4"><div class="card stat-card p-3"><span class="small-muted">Catalog Products</span><h3>${db.products.length}</h3></div></div><div class="col-md-4"><div class="card stat-card p-3"><span class="small-muted">Active Campaigns</span><h3>${db.campaigns.filter((c) => c.status === "Active").length}</h3></div></div><div class="col-md-4"><div class="card stat-card p-3"><span class="small-muted">Inventory Units</span><h3>${db.products.reduce((s, p) => s + Number(p.stock), 0)}</h3></div></div></div><div id="products" class="card p-4 mb-4"><h5>Add Product to Catalog</h5><form id="productForm" class="row g-2"><div class="col-md-6"><input id="newProductName" class="form-control" placeholder="Product name" required></div><div class="col-md-3"><input id="newProductPrice" type="number" class="form-control" placeholder="Price" required></div><div class="col-md-3"><input id="newProductStock" type="number" class="form-control" placeholder="Stock" required></div><div class="col-md-6"><select id="newProductCategory" class="form-select"><option>Electronics</option><option>Home</option><option>Furniture</option></select></div><div class="col-md-6"><select id="newProductCondition" class="form-select"><option>New</option><option>Refurbished</option></select></div><div class="col-12"><button class="btn btn-dark">Add Product</button></div></form><div id="productMsg"></div></div><div id="campaign" class="card p-4"><h5>Create Group Purchase Campaign</h5><form id="campaignForm" class="row g-2"><div class="col-md-6"><select id="campaignProduct" class="form-select">${db.products.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></div><div class="col-md-2"><input id="campaignTarget" type="number" min="2" class="form-control" placeholder="Target" required></div><div class="col-md-2"><input id="campaignDiscount" type="number" min="1" max="90" class="form-control" placeholder="Discount %" required></div><div class="col-md-2"><input id="campaignDuration" class="form-control" placeholder="End date" required></div><div class="col-12"><button class="btn btn-dark">Create Campaign</button></div></form><div id="campaignMsg"></div></div>`,
+    `
+      <div class="alert alert-light border">
+        Manage catalog products, resale inventory, group campaigns and
+        products ready for customer delivery.
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-3">
+          <div class="card stat-card p-3">
+            <span class="small-muted">Catalog Products</span>
+            <h3>${db.products.length}</h3>
+          </div>
+        </div>
+
+        <div class="col-md-3">
+          <div class="card stat-card p-3">
+            <span class="small-muted">Active Campaigns</span>
+            <h3>
+              ${db.campaigns.filter((c) => c.status === "Active").length}
+            </h3>
+          </div>
+        </div>
+
+        <div class="col-md-3">
+          <div class="card stat-card p-3">
+            <span class="small-muted">Ready for Resale</span>
+            <h3>${readyForResale.length}</h3>
+          </div>
+        </div>
+
+        <div class="col-md-3">
+          <div class="card stat-card p-3">
+            <span class="small-muted">Ready to Return</span>
+            <h3>${readyToReturn.length}</h3>
+          </div>
+        </div>
+      </div>
+
+      <div class="card p-4 mb-4">
+        <h5 class="mb-3">Ready for Resale</h5>
+        <p class="small-muted">
+          Completely refurbished and quality-checked products that can be
+          added to the catalog for resale.
+        </p>
+
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Request ID</th>
+                <th>Condition</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${
+                readyForResale.length
+                  ? readyForResale
+                      .map(
+                        (record) => `
+                          <tr>
+                            <td>
+                              <strong>${esc(record.productName)}</strong>
+                              <div class="small-muted">
+                                Assignment ID: ${esc(record.id)}
+                              </div>
+                            </td>
+
+                            <td>${esc(record.requestId)}</td>
+
+                            <td>${esc(record.condition || "Refurbished")}</td>
+
+                            <td>
+                              <span class="badge bg-success">
+                                ${esc(record.status)}
+                              </span>
+                            </td>
+
+                            <td>
+                              <button
+                                type="button"
+                                class="btn btn-sm btn-dark"
+                                onclick="addResaleProductToCatalog('${encodeURIComponent(
+                                  record.id
+                                )}')"
+                              >
+                                Add to Catalog
+                              </button>
+                            </td>
+                          </tr>
+                        `
+                      )
+                      .join("")
+                  : `
+                    <tr>
+                      <td colspan="5" class="text-center small-muted">
+                        No products ready for resale.
+                      </td>
+                    </tr>
+                  `
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card p-4 mb-4">
+        <h5 class="mb-3">Ready to Be Sent to Customer</h5>
+        <p class="small-muted">
+          Repaired products that must be returned to the original customer.
+        </p>
+
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Request ID</th>
+                <th>Customer ID</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${
+                readyToReturn.length
+                  ? readyToReturn
+                      .map(
+                        (record) => `
+                          <tr>
+                            <td>
+                              <strong>${esc(record.productName)}</strong>
+                              <div class="small-muted">
+                                Assignment ID: ${esc(record.id)}
+                              </div>
+                            </td>
+
+                            <td>${esc(record.requestId)}</td>
+
+                            <td>${esc(record.customerId || "Not available")}</td>
+
+                            <td>
+                              <span class="badge bg-success">
+                                ${esc(record.status)}
+                              </span>
+                            </td>
+
+                            <td>
+                              <button
+                                type="button"
+                                class="btn btn-sm btn-dark"
+                                onclick="markProductSentToCustomer('${encodeURIComponent(
+                                  record.id
+                                )}')"
+                              >
+                                Sent to Customer
+                              </button>
+                            </td>
+                          </tr>
+                        `
+                      )
+                      .join("")
+                  : `
+                    <tr>
+                      <td colspan="5" class="text-center small-muted">
+                        No repaired products ready for return.
+                      </td>
+                    </tr>
+                  `
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="products" class="card p-4 mb-4">
+        <h5>Add Product to Catalog</h5>
+
+        <form id="productForm" class="row g-2">
+          <div class="col-md-6">
+            <input
+              id="newProductName"
+              class="form-control"
+              placeholder="Product name"
+              required
+            >
+          </div>
+
+          <div class="col-md-3">
+            <input
+              id="newProductPrice"
+              type="number"
+              class="form-control"
+              placeholder="Price"
+              required
+            >
+          </div>
+
+          <div class="col-md-3">
+            <input
+              id="newProductStock"
+              type="number"
+              class="form-control"
+              placeholder="Stock"
+              required
+            >
+          </div>
+
+          <div class="col-md-6">
+            <select id="newProductCategory" class="form-select">
+              <option>Electronics</option>
+              <option>Home</option>
+              <option>Furniture</option>
+            </select>
+          </div>
+
+          <div class="col-md-6">
+            <select id="newProductCondition" class="form-select">
+              <option>New</option>
+              <option>Refurbished</option>
+            </select>
+          </div>
+
+          <div class="col-12">
+            <button class="btn btn-dark">Add Product</button>
+          </div>
+        </form>
+
+        <div id="productMsg"></div>
+      </div>
+
+      <div id="campaign" class="card p-4">
+        <h5>Create Group Purchase Campaign</h5>
+
+        <form id="campaignForm" class="row g-2">
+          <div class="col-md-6">
+            <select id="campaignProduct" class="form-select">
+              ${db.products
+                .map(
+                  (p) =>
+                    `<option value="${p.id}">${esc(p.name)}</option>`
+                )
+                .join("")}
+            </select>
+          </div>
+
+          <div class="col-md-2">
+            <input
+              id="campaignTarget"
+              type="number"
+              min="2"
+              class="form-control"
+              placeholder="Target"
+              required
+            >
+          </div>
+
+          <div class="col-md-2">
+            <input
+              id="campaignDiscount"
+              type="number"
+              min="1"
+              max="90"
+              class="form-control"
+              placeholder="Discount %"
+              required
+            >
+          </div>
+
+          <div class="col-md-2">
+            <input
+              id="campaignDuration"
+              class="form-control"
+              placeholder="End date"
+              required
+            >
+          </div>
+
+          <div class="col-12">
+            <button class="btn btn-dark">Create Campaign</button>
+          </div>
+        </form>
+
+        <div id="campaignMsg"></div>
+      </div>
+    `
   );
+
   document.getElementById("productForm").onsubmit = (e) => {
     e.preventDefault();
+
     db.products.push({
       id: Date.now(),
-      name: newProductName.value,
-      price: Number(newProductPrice.value),
-      stock: Number(newProductStock.value),
-      category: newProductCategory.value,
-      condition: newProductCondition.value,
+      name: document.getElementById("newProductName").value,
+      price: Number(document.getElementById("newProductPrice").value),
+      stock: Number(document.getElementById("newProductStock").value),
+      category: document.getElementById("newProductCategory").value,
+      condition: document.getElementById("newProductCondition").value,
       description: "Catalog product",
       icon: "📦",
     });
+
     saveDB(db);
-    productMsg.innerHTML = alertBox("Product added to catalog.");
+
+    document.getElementById("productMsg").innerHTML = alertBox(
+      "Product added to catalog."
+    );
+
     setTimeout(() => location.reload(), 600);
   };
+
   document.getElementById("campaignForm").onsubmit = (e) => {
     e.preventDefault();
+
     db.campaigns.push({
       id: Date.now(),
-      productId: Number(campaignProduct.value),
-      target: Number(campaignTarget.value),
+      productId: Number(document.getElementById("campaignProduct").value),
+      target: Number(document.getElementById("campaignTarget").value),
       joined: 0,
-      discount: Number(campaignDiscount.value),
-      duration: campaignDuration.value,
+      discount: Number(
+        document.getElementById("campaignDiscount").value
+      ),
+      duration: document.getElementById("campaignDuration").value,
       status: "Active",
     });
+
     saveDB(db);
-    campaignMsg.innerHTML = alertBox("Group campaign created.");
+
+    document.getElementById("campaignMsg").innerHTML = alertBox(
+      "Group campaign created."
+    );
+
     setTimeout(() => location.reload(), 600);
   };
 }
@@ -959,31 +1563,20 @@ function serviceNav() {
             </li>
 
             <li class="nav-item">
-              <a class="nav-link" href="assessment.html">
-                Assessments
+              <a class="nav-link" href="service-completed.html">
+                Completed Work
               </a>
             </li>
 
             <li class="nav-item">
-              <a class="nav-link" href="service-record.html">
-                Repair / Refurbishment
-              </a>
-            </li>
-
-            <li class="nav-item">
-              <a class="nav-link" href="quality-check.html">
-                Quality Checks
-              </a>
-            </li>
-
-            <li class="nav-item">
-              <a class="nav-link" href="service-dashboard.html#recycling">
-                Send to Recycling
+              <a class="nav-link" href="service-recycling.html">
+                Sent to Recycling
               </a>
             </li>
           </ul>
 
           <span class="small-muted me-2">Service Team</span>
+
           <button class="btn btn-sm btn-dark" onclick="logout()">
             Logout
           </button>
@@ -1245,120 +1838,137 @@ function initServiceDashboard() {
 
   const db = getDB();
 
-  const assigned = db.recoveryRequests.filter(r =>
-    [
-      "Collected",
-      "Accepted at Company",
-      "Assigned to Service Team",
-      "Repair in Progress",
-      "Refurbishment in Progress",
-      "Quality Check"
-    ].includes(r.status)
-  );
+  if (!Array.isArray(db.recoveryRequests)) {
+    db.recoveryRequests = [];
+  }
 
-  layoutWithNav(`
-    <div class="d-flex justify-content-between align-items-center mb-4">
-      <div>
-        <span class="small text-uppercase text-secondary">
-          Service & Refurbishment workspace
-        </span>
-        <h2>Assigned Work</h2>
-        <p class="small-muted mb-0">
-          Process customer recovery requests from assessment to quality verification.
+  const assignedStatuses = [
+    "Submitted",
+    "Collected",
+    "Accepted at Company",
+    "Assigned to Service Team",
+    "Repair in Progress",
+    "Refurbishment in Progress",
+    "Quality Check"
+  ];
+
+  const assignedWork = db.recoveryRequests.filter((request) => {
+    return (
+      assignedStatuses.includes(request.status) &&
+      request.finalDestination !== "recycling" &&
+      request.status !== "Completed" &&
+      request.status !== "Ready for Resale" &&
+      request.status !== "Ready to Be Sent to Customer" &&
+      request.status !== "Sent to Customer" &&
+      request.status !== "Sent to Recycling Partner"
+    );
+  });
+
+  const renderRequestRows = (requests) => {
+    if (!requests.length) {
+      return `
+        <tr>
+          <td colspan="5" class="text-center small-muted">
+            No assigned work available.
+          </td>
+        </tr>
+      `;
+    }
+
+    return requests
+      .map((request) => {
+        return `
+          <tr>
+            <td>
+              <strong>${esc(request.productName || "Unnamed Product")}</strong>
+              <div class="small-muted">
+                ${esc(request.id)}
+              </div>
+            </td>
+
+            <td>
+              ${
+                request.option === "sell"
+                  ? "Sell to platform"
+                  : "Repair and return"
+              }
+            </td>
+
+            <td>
+              <span class="badge badge-soft">
+                ${esc(request.status || "Unknown")}
+              </span>
+            </td>
+
+            <td>
+              ${esc(request.finalDestination || "Service Team")}
+            </td>
+
+            <td>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-dark"
+                onclick="openServiceRequest('${encodeURIComponent(request.id)}')"
+              >
+                Open Product
+              </button>
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
+  };
+
+  layoutWithNav(
+    `
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+          <span class="small text-uppercase text-secondary">
+            Service & Refurbishment Workspace
+          </span>
+
+          <h2>Service Dashboard</h2>
+
+          <p class="small-muted mb-0">
+            View and manage products currently assigned to the service team.
+          </p>
+        </div>
+      </div>
+
+      ${cards([
+        ["Assigned Work", assignedWork.length]
+      ])}
+
+      <div class="card p-4">
+        <h5 class="mb-3">Assigned Work</h5>
+
+        <p class="small-muted">
+          These products are currently under assessment, repair,
+          refurbishment or quality checking.
         </p>
+
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Recovery Option</th>
+                <th>Status</th>
+                <th>Assigned To</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${renderRequestRows(assignedWork)}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
-
-    ${cards([
-      ["Assigned Requests", assigned.length],
-      ["Assessments", db.assessments.length],
-      ["Quality Checks", db.qualityChecks.length]
-    ])}
-
-    <div class="card p-4 mb-4">
-      <h5>Customer Recovery Requests</h5>
-
-      <div class="table-responsive">
-        <table class="table align-middle">
-          <thead>
-            <tr>
-              <th>Product</th>
-              <th>Customer Option</th>
-              <th>Status</th>
-              <th>Next Action</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            ${
-              assigned.map(r => `
-                <tr>
-                  <td>
-                    <strong>${esc(r.productName)}</strong>
-                    <div class="small-muted">${esc(r.id)}</div>
-                  </td>
-
-                  <td>
-                    ${r.option === "sell"
-                      ? "Sell to platform"
-                      : "Repair and return"}
-                  </td>
-
-                  <td>
-                    <span class="badge badge-soft">
-                      ${esc(r.status)}
-                    </span>
-                  </td>
-
-                  <td>
-                    <button
-                      class="btn btn-sm btn-outline-dark"
-                      onclick="openServiceRequest('${r.id}')">
-                      Open Request
-                    </button>
-                  </td>
-                </tr>
-              `).join("")
-            }
-
-            ${
-              assigned.length
-                ? ""
-                : `<tr>
-                    <td colspan="4" class="text-center small-muted">
-                      No assigned work.
-                    </td>
-                  </tr>`
-            }
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <div id="requestPanel" class="card p-4 mb-4">
-      <h5>Select a request</h5>
-      <p class="small-muted">
-        Open an assigned request to choose the required record page.
-      </p>
-    </div>
-
-    <div id="assessment" class="card p-4 mb-4">
-      <h5>Assessment Records</h5>
-      <div id="assessmentList"></div>
-    </div>
-
-    <div id="service-records" class="card p-4 mb-4">
-      <h5>Repair / Refurbishment Records</h5>
-      <div id="serviceList"></div>
-    </div>
-
-    <div id="quality" class="card p-4">
-      <h5>Quality Check Records</h5>
-      <div id="qualityList"></div>
-    </div>
-  `, "Service Dashboard", serviceNav());
-
-  renderServiceLists();
+    `,
+    "Service Dashboard",
+    serviceNav()
+  );
 }
 function renderServiceLists() {
   const db = getDB();
@@ -1618,6 +2228,1089 @@ function initAssessment() {
   });
 }
 
+
+function initServiceRecord() {
+  if (!requireLogin()) return;
+
+  const db = getDB();
+
+  const requestId = new URLSearchParams(
+    window.location.search
+  ).get("requestId");
+
+  const request = db.recoveryRequests.find(
+    r => String(r.id) === String(requestId)
+  );
+
+  if (!request) {
+    layoutWithNav(
+      `
+      <div class="alert alert-danger">
+        Recovery request not found.
+      </div>
+      `,
+      "Service Record",
+      serviceNav()
+    );
+
+    return;
+  }
+
+  layoutWithNav(
+    `
+    <div class="row justify-content-center">
+      <div class="col-lg-8">
+
+        <div class="card p-4">
+
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+              <span class="small text-uppercase text-secondary">
+                Service Team
+              </span>
+
+              <h2>Repair / Refurbishment Record</h2>
+            </div>
+
+            <a
+              href="service-request.html?requestId=${encodeURIComponent(request.id)}"
+              class="btn btn-outline-dark"
+            >
+              Back
+            </a>
+          </div>
+
+          <div class="alert alert-light border">
+            <strong>Product:</strong>
+            ${esc(request.productName || "N/A")}
+            <br>
+
+            <strong>Request ID:</strong>
+            ${esc(request.id)}
+          </div>
+
+          <form id="serviceRecordForm">
+
+            <div class="mb-3">
+              <label for="serviceType" class="form-label">
+                Service Type
+              </label>
+
+              <select
+                id="serviceType"
+                class="form-select"
+                required
+              >
+                <option value="">Select service type</option>
+                <option value="Repair">Repair</option>
+                <option value="Refurbishment">Refurbishment</option>
+              </select>
+            </div>
+
+            <div class="mb-3">
+              <label for="serviceDescription" class="form-label">
+                Work Performed
+              </label>
+
+              <textarea
+                id="serviceDescription"
+                class="form-control"
+                rows="4"
+                placeholder="Describe the repair or refurbishment work"
+                required
+              ></textarea>
+            </div>
+
+            <div class="mb-3">
+              <label for="partsUsed" class="form-label">
+                Parts Replaced or Used
+              </label>
+
+              <textarea
+                id="partsUsed"
+                class="form-control"
+                rows="3"
+                placeholder="List parts replaced or used"
+                required
+              ></textarea>
+            </div>
+
+            <div class="mb-3">
+              <label for="serviceStatus" class="form-label">
+                Service Status
+              </label>
+
+              <select
+                id="serviceStatus"
+                class="form-select"
+                required
+              >
+                <option value="In Progress">In Progress</option>
+                <option value="Completed">Completed</option>
+              </select>
+            </div>
+
+            <button
+              type="submit"
+              class="btn btn-dark"
+            >
+              Save Service Record
+            </button>
+
+          </form>
+
+          <div id="serviceMsg" class="mt-3"></div>
+
+        </div>
+
+      </div>
+    </div>
+    `,
+    "Repair / Refurbishment Record",
+    serviceNav()
+  );
+
+  const serviceRecordForm = document.getElementById(
+    "serviceRecordForm"
+  );
+
+  if (!serviceRecordForm) return;
+
+  serviceRecordForm.addEventListener("submit", function (event) {
+    event.preventDefault();
+
+    if (!serviceRecordForm.checkValidity()) {
+      serviceRecordForm.classList.add("was-validated");
+      return;
+    }
+
+    const type = document.getElementById("serviceType").value;
+
+    const status = document.getElementById("serviceStatus").value;
+
+    const record = {
+      id: uid("SRV-"),
+      requestId: request.id,
+      type: type,
+
+      description: document
+        .getElementById("serviceDescription")
+        .value
+        .trim(),
+
+      partsUsed: document
+        .getElementById("partsUsed")
+        .value
+        .trim(),
+
+      status: status,
+      createdAt: new Date().toLocaleString()
+    };
+
+    if (!Array.isArray(db.repairs)) {
+      db.repairs = [];
+    }
+
+    if (!Array.isArray(db.refurbishments)) {
+      db.refurbishments = [];
+    }
+
+    if (type === "Repair") {
+      db.repairs.push(record);
+
+      request.status =
+        status === "Completed"
+          ? "Quality Check"
+          : "Repair in Progress";
+    } else {
+      db.refurbishments.push(record);
+
+      request.status =
+        status === "Completed"
+          ? "Quality Check"
+          : "Refurbishment in Progress";
+    }
+
+    saveDB(db);
+
+    const serviceMsg = document.getElementById("serviceMsg");
+
+    serviceMsg.innerHTML = alertBox(
+      "Repair/refurbishment record created successfully."
+    );
+
+    setTimeout(function () {
+      window.location.href =
+        `service-request.html?requestId=${encodeURIComponent(request.id)}`;
+    }, 900);
+  });
+}
+function initQualityCheck() {
+  if (!requireLogin()) return;
+
+  const db = getDB();
+
+  // Ensure the array exists even in older localStorage data
+  if (!Array.isArray(db.qualityChecks)) {
+    db.qualityChecks = [];
+  }
+
+  const requestId = new URLSearchParams(
+    window.location.search
+  ).get("requestId");
+
+  const request = db.recoveryRequests.find(
+    r => String(r.id) === String(requestId)
+  );
+
+  if (!request) {
+    layoutWithNav(
+      `
+      <div class="alert alert-danger">
+        Recovery request not found.
+        <br>
+        Request ID: ${esc(requestId || "Missing")}
+      </div>
+      `,
+      "Quality Check",
+      serviceNav()
+    );
+
+    return;
+  }
+
+  layoutWithNav(
+    `
+    <div class="row justify-content-center">
+      <div class="col-lg-8">
+
+        <div class="card p-4">
+
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+              <span class="small text-uppercase text-secondary">
+                Service Team
+              </span>
+
+              <h2>Create Quality Check Record</h2>
+            </div>
+
+            <a
+              href="service-request.html?requestId=${encodeURIComponent(request.id)}"
+              class="btn btn-outline-dark"
+            >
+              Back
+            </a>
+          </div>
+
+          <div class="alert alert-light border">
+            <strong>Product:</strong>
+            ${esc(request.productName || "Unnamed Product")}
+            <br>
+
+            <strong>Request ID:</strong>
+            ${esc(request.id)}
+          </div>
+
+          <form id="qualityCheckForm" novalidate>
+
+            <div class="mb-3">
+              <label for="qualityResult" class="form-label">
+                Quality Check Result
+              </label>
+
+              <select
+                id="qualityResult"
+                class="form-select"
+                required
+              >
+                <option value="">Select result</option>
+                <option value="Passed">Passed</option>
+                <option value="Failed">Failed</option>
+              </select>
+
+              <div class="invalid-feedback">
+                Please select the quality check result.
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label for="qualityFunctionality" class="form-label">
+                Functionality Verification
+              </label>
+
+              <textarea
+                id="qualityFunctionality"
+                class="form-control"
+                rows="3"
+                placeholder="Describe the final functionality test"
+                required
+              ></textarea>
+
+              <div class="invalid-feedback">
+                Please enter the functionality verification details.
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label for="qualityRemarks" class="form-label">
+                Final Remarks
+              </label>
+
+              <textarea
+                id="qualityRemarks"
+                class="form-control"
+                rows="3"
+                placeholder="Add final quality verification remarks"
+                required
+              ></textarea>
+
+              <div class="invalid-feedback">
+                Please enter the final remarks.
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              class="btn btn-dark"
+            >
+              Save Quality Check Record
+            </button>
+
+          </form>
+
+          <div id="qualityMsg" class="mt-3"></div>
+
+        </div>
+
+      </div>
+    </div>
+    `,
+    "Create Quality Check Record",
+    serviceNav()
+  );
+
+  const qualityCheckForm =
+    document.getElementById("qualityCheckForm");
+
+  qualityCheckForm.addEventListener("submit", function (event) {
+    event.preventDefault();
+
+    if (!qualityCheckForm.checkValidity()) {
+      qualityCheckForm.classList.add("was-validated");
+      return;
+    }
+
+    const result =
+      document.getElementById("qualityResult").value;
+
+    const functionality =
+      document.getElementById("qualityFunctionality").value.trim();
+
+    const remarks =
+      document.getElementById("qualityRemarks").value.trim();
+
+    const qualityRecord = {
+      id: uid("QC-"),
+      requestId: request.id,
+      result,
+      functionality,
+      remarks,
+      createdAt: new Date().toLocaleString()
+    };
+
+    db.qualityChecks.push(qualityRecord);
+
+    /*
+      Passed:
+      The product moves to Completed.
+
+      Failed:
+      The request remains in Quality Check
+      so the service team can inspect it again.
+    */
+    request.status =
+      result === "Passed"
+        ? "Completed"
+        : "Quality Check";
+
+    saveDB(db);
+
+    document.getElementById("qualityMsg").innerHTML =
+      alertBox("Quality check record created successfully.");
+
+    setTimeout(function () {
+      window.location.href =
+        `service-request.html?requestId=${encodeURIComponent(request.id)}`;
+    }, 900);
+  });
+}
+
+function sendToRecycling(encodedRequestId) {
+  const requestId = decodeURIComponent(encodedRequestId);
+  const db = getDB();
+
+  if (!Array.isArray(db.recyclingRecords)) {
+    db.recyclingRecords = [];
+  }
+
+  if (!Array.isArray(db.resaleRecords)) {
+    db.resaleRecords = [];
+  }
+
+  const request = db.recoveryRequests.find(
+    (r) => String(r.id) === String(requestId)
+  );
+
+  if (!request) {
+    alert("Recovery request not found.");
+    return;
+  }
+
+  // Prevent sending the same product to both destinations
+  if (request.finalDestination === "resale") {
+    alert("This product has already been sent to resale/return.");
+    return;
+  }
+
+  if (request.finalDestination === "recycling") {
+    alert("This product has already been sent to recycling.");
+    return;
+  }
+
+  const existingRecyclingRecord = db.recyclingRecords.find(
+    (record) =>
+      String(record.requestId) === String(request.id) &&
+      record.status !== "Recycled"
+  );
+
+  if (existingRecyclingRecord) {
+    alert("This product is already assigned to the recycling partner.");
+    return;
+  }
+
+  const recyclingRequest = {
+    id: uid("RCR-"),
+    requestId: request.id,
+    productId: request.productId || null,
+    productName: request.productName || "Unnamed Product",
+    customerId: request.customerId || null,
+    condition: request.condition || "Not specified",
+    description: request.description || "",
+    source: "Service Team",
+    assignedTo: "Recycling Partner",
+    status: "Assigned",
+    materials: "",
+    remarks: "",
+    createdAt: new Date().toLocaleString(),
+  };
+
+  db.recyclingRecords.push(recyclingRequest);
+
+  request.status = "Sent to Recycling Partner";
+  request.finalDestination = "recycling";
+  request.recyclingRequestId = recyclingRequest.id;
+  request.assignedTo = "Recycling Partner";
+
+  saveDB(db);
+
+  alert("Product assigned to the recycling partner.");
+
+  // Stay on the current service request page
+  location.href =
+    "service-request.html?requestId=" +
+    encodeURIComponent(request.id);
+}
+
+function sendToResaleOrReturn(encodedRequestId) {
+  const requestId = decodeURIComponent(encodedRequestId);
+  const db = getDB();
+
+  if (!Array.isArray(db.resaleRecords)) {
+    db.resaleRecords = [];
+  }
+
+  if (!Array.isArray(db.recyclingRecords)) {
+    db.recyclingRecords = [];
+  }
+
+  const request = db.recoveryRequests.find(
+    (r) => String(r.id) === String(requestId)
+  );
+
+  if (!request) {
+    alert("Recovery request not found.");
+    return;
+  }
+
+  // Prevent sending the same product to both destinations
+  if (request.finalDestination === "recycling") {
+    alert("This product has already been sent to recycling.");
+    return;
+  }
+
+  if (request.finalDestination === "resale") {
+    alert("This product has already been sent to resale/return.");
+    return;
+  }
+
+  const existingResaleRecord = db.resaleRecords.find(
+    (record) =>
+      String(record.requestId) === String(request.id) &&
+      record.status !== "Completed"
+  );
+
+  if (existingResaleRecord) {
+    alert("This product is already assigned to the sales team.");
+    return;
+  }
+
+  const isRepairRequest = request.option === "repair";
+
+  const resaleRecord = {
+    id: uid("RSR-"),
+    requestId: request.id,
+    productId: request.productId || null,
+    productName: request.productName || "Unnamed Product",
+    customerId: request.customerId || null,
+    customerName: request.customerName || "",
+    condition: request.condition || "Not specified",
+    description: request.description || "",
+    source: "Service Team",
+    assignedTo: "Sales Team",
+    type: isRepairRequest ? "return" : "resale",
+    section: isRepairRequest
+      ? "Ready to Be Sent to Customer"
+      : "Ready for Resale",
+    status: "Completed",
+    createdAt: new Date().toLocaleString(),
+  };
+
+  db.resaleRecords.push(resaleRecord);
+
+  request.status = isRepairRequest
+    ? "Ready to Be Sent to Customer"
+    : "Ready for Resale";
+
+  request.finalDestination = "resale";
+  request.resaleRequestId = resaleRecord.id;
+  request.assignedTo = "Sales Team";
+
+  saveDB(db);
+
+  alert(
+    isRepairRequest
+      ? "Product marked as ready to be sent back to the customer."
+      : "Product sent to the Sales Team's Ready for Resale section."
+  );
+
+  // Stay on the current service request page
+  location.href =
+    "service-request.html?requestId=" +
+    encodeURIComponent(request.id);
+}
+function openRecyclingRequest(encodedRecyclingId) {
+  if (!requireLogin()) return;
+
+  const recyclingId = decodeURIComponent(encodedRecyclingId);
+
+  const db = getDB();
+
+  const recyclingRequest = db.recyclingRecords.find(
+    record => String(record.id) === String(recyclingId)
+  );
+
+  if (!recyclingRequest) {
+    alert("Recycling request not found.");
+    return;
+  }
+
+  const request = db.recoveryRequests.find(
+    r => String(r.id) === String(recyclingRequest.requestId)
+  );
+
+  if (!request) {
+    alert("Original recovery request not found.");
+    return;
+  }
+
+  layoutWithNav(
+    `
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div>
+        <span class="small text-uppercase text-secondary">
+          Recycling Partner
+        </span>
+        <h2>Assigned Recycling Work</h2>
+      </div>
+
+      <a
+        href="recycling-dashboard.html"
+        class="btn btn-outline-dark"
+      >
+        Back to Dashboard
+      </a>
+    </div>
+
+    <div class="card p-4 mb-4">
+      <h5>${esc(recyclingRequest.productName)}</h5>
+
+      <p class="small-muted mb-1">
+        Recycling Assignment ID:
+        ${esc(recyclingRequest.id)}
+      </p>
+
+      <p class="small-muted">
+        Recovery Request ID:
+        ${esc(recyclingRequest.requestId)}
+      </p>
+
+      <hr>
+
+      <p>
+        <strong>Product Condition:</strong>
+        ${esc(recyclingRequest.condition || "Not specified")}
+      </p>
+
+      <p>
+        <strong>Description:</strong>
+        ${esc(recyclingRequest.description || "No description provided")}
+      </p>
+
+      <p>
+        <strong>Assigned By:</strong>
+        ${esc(recyclingRequest.source || "Service Team")}
+      </p>
+
+      <p class="mb-0">
+        <strong>Status:</strong>
+        <span class="badge badge-soft">
+          ${esc(recyclingRequest.status)}
+        </span>
+      </p>
+    </div>
+
+    <div class="card p-4">
+      <h5 class="mb-3">Record Recycling Activity</h5>
+
+      <form id="recyclingWorkForm">
+
+        <div class="mb-3">
+          <label for="recyclingStatus" class="form-label">
+            Recycling Status
+          </label>
+
+          <select id="recyclingStatus" class="form-select" required>
+            <option value="">Select status</option>
+            <option value="Received">Received</option>
+            <option value="Material Recovered">Material Recovered</option>
+            <option value="Recycled">Recycled</option>
+          </select>
+        </div>
+
+        <div class="mb-3">
+          <label for="recyclingMaterials" class="form-label">
+            Useful Parts / Materials Recovered
+          </label>
+
+          <textarea
+            id="recyclingMaterials"
+            class="form-control"
+            rows="4"
+            placeholder="Enter useful parts or materials recovered"
+            required
+          ></textarea>
+        </div>
+
+        <div class="mb-3">
+          <label for="recyclingRemarks" class="form-label">
+            Recycling Remarks
+          </label>
+
+          <textarea
+            id="recyclingRemarks"
+            class="form-control"
+            rows="3"
+            placeholder="Enter recycling remarks"
+          ></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-dark">
+          Save Recycling Report
+        </button>
+
+      </form>
+
+      <div id="recyclingWorkMsg" class="mt-3"></div>
+    </div>
+    `,
+    "Assigned Recycling Work",
+    serviceNav()
+  );
+
+  const form = document.getElementById("recyclingWorkForm");
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+
+    const status =
+      document.getElementById("recyclingStatus").value;
+
+    const materials =
+      document.getElementById("recyclingMaterials").value.trim();
+
+    const remarks =
+      document.getElementById("recyclingRemarks").value.trim();
+
+    if (!status || !materials) {
+      document.getElementById("recyclingWorkMsg").innerHTML =
+        alertBox("Please complete all required fields.");
+      return;
+    }
+
+    recyclingRequest.status = status;
+    recyclingRequest.materials = materials;
+    recyclingRequest.remarks = remarks;
+    recyclingRequest.updatedAt = new Date().toLocaleString();
+
+    if (status === "Recycled") {
+      request.status = "Recycled";
+    } else {
+      request.status = "Recycling in Progress";
+    }
+
+    saveDB(db);
+
+    document.getElementById("recyclingWorkMsg").innerHTML =
+      alertBox("Recycling report saved successfully.");
+
+    setTimeout(function () {
+      window.location.href = "recycling-dashboard.html";
+    }, 900);
+  });
+}
+
+function addResaleProductToCatalog(encodedRecordId) {
+  const recordId = decodeURIComponent(encodedRecordId);
+  const db = getDB();
+
+  if (!Array.isArray(db.resaleRecords)) {
+    db.resaleRecords = [];
+  }
+
+  const record = db.resaleRecords.find(
+    (r) => String(r.id) === String(recordId)
+  );
+
+  if (!record) {
+    alert("Resale record not found.");
+    return;
+  }
+
+  if (record.section !== "Ready for Resale") {
+    alert("This product is not marked for resale.");
+    return;
+  }
+
+  if (record.catalogProductId) {
+    alert("This product has already been added to the catalog.");
+    return;
+  }
+
+  const newProduct = {
+    id: Date.now(),
+    name: record.productName,
+    category: "Recovered Product",
+    price: 0,
+    stock: 1,
+    condition: "Refurbished",
+    description:
+      record.description ||
+      "Refurbished product recovered through CircularCommerce.",
+    icon: "📦",
+  };
+
+  db.products.push(newProduct);
+
+  record.catalogProductId = newProduct.id;
+  record.status = "Added to Catalog";
+  record.completedAt = new Date().toLocaleString();
+
+  saveDB(db);
+
+  alert("Product added to the catalog.");
+  location.reload();
+}
+function markProductSentToCustomer(encodedRecordId) {
+  const recordId = decodeURIComponent(encodedRecordId);
+  const db = getDB();
+
+  if (!Array.isArray(db.resaleRecords)) {
+    db.resaleRecords = [];
+  }
+
+  const record = db.resaleRecords.find(
+    (r) => String(r.id) === String(recordId)
+  );
+
+  if (!record) {
+    alert("Return record not found.");
+    return;
+  }
+
+  if (record.section !== "Ready to Be Sent to Customer") {
+    alert("This product is not ready for customer return.");
+    return;
+  }
+
+  if (record.status === "Sent to Customer") {
+    alert("This product has already been sent to the customer.");
+    return;
+  }
+
+  record.status = "Sent to Customer";
+  record.sentAt = new Date().toLocaleString();
+
+  const request = db.recoveryRequests.find(
+    (r) => String(r.id) === String(record.requestId)
+  );
+
+  if (request) {
+    request.status = "Sent to Customer";
+    request.assignedTo = "Customer";
+    request.returnCompletedAt = new Date().toLocaleString();
+  }
+
+  saveDB(db);
+
+  alert("Product marked as sent to the customer.");
+  location.reload();
+}
+
+
+function initServiceCompleted() {
+  if (!requireLogin()) return;
+
+  const db = getDB();
+
+  const completedStatuses = [
+  "Completed",
+  "Ready for Resale",
+  "Ready to Be Sent to Customer",
+  "Sent to Customer"
+];
+
+const completed = db.recoveryRequests.filter((r) => {
+  return (
+    completedStatuses.includes(r.status) &&
+    r.finalDestination !== "recycling"
+  );
+});
+
+  layoutWithNav(
+    `
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+          <span class="small text-uppercase text-secondary">
+            Service & Refurbishment Workspace
+          </span>
+
+          <h2>Completed Work</h2>
+
+          <p class="small-muted mb-0">
+            Products that have completed assessment, repair/refurbishment,
+            and quality checking.
+          </p>
+        </div>
+      </div>
+
+      ${cards([
+        ["Completed Products", completed.length]
+      ])}
+
+      <div class="card p-4">
+        <h5 class="mb-3">Completed Products</h5>
+
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Request ID</th>
+                <th>Recovery Option</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${
+                completed.length
+                  ? completed
+                      .map(
+                        (r) => `
+                          <tr>
+                            <td>
+                              <strong>${esc(r.productName)}</strong>
+                              <div class="small-muted">
+                                ${esc(r.condition || "Not specified")}
+                              </div>
+                            </td>
+
+                            <td>${esc(r.id)}</td>
+
+                            <td>
+                              ${
+                                r.option === "sell"
+                                  ? "Sell to platform"
+                                  : "Repair and return"
+                              }
+                            </td>
+
+                            <td>
+                              <span class="badge bg-success">
+                                ${esc(r.status)}
+                              </span>
+                            </td>
+
+                            <td>
+                              <button
+                                type="button"
+                                class="btn btn-sm btn-outline-dark"
+                                onclick="openServiceRequest('${encodeURIComponent(
+                                  r.id
+                                )}')"
+                              >
+                                View Reports
+                              </button>
+                            </td>
+                          </tr>
+                        `
+                      )
+                      .join("")
+                  : `
+                    <tr>
+                      <td colspan="5" class="text-center small-muted">
+                        No completed work available.
+                      </td>
+                    </tr>
+                  `
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `,
+    "Completed Work",
+    serviceNav()
+  );
+}
+
+function initServiceRecycling() {
+  if (!requireLogin()) return;
+
+  const db = getDB();
+
+  const recyclingRequests = db.recoveryRequests.filter(
+    (r) =>
+      r.finalDestination === "recycling" ||
+      r.status === "Sent to Recycling Partner"
+  );
+
+  layoutWithNav(
+    `
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+          <span class="small text-uppercase text-secondary">
+            Service & Refurbishment Workspace
+          </span>
+
+          <h2>Sent to Recycling</h2>
+
+          <p class="small-muted mb-0">
+            Products assigned to the recycling partner for material recovery.
+          </p>
+        </div>
+      </div>
+
+      ${cards([
+        ["Sent to Recycling", recyclingRequests.length]
+      ])}
+
+      <div class="card p-4">
+        <h5 class="mb-3">Recycling Requests</h5>
+
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Request ID</th>
+                <th>Condition</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${
+                recyclingRequests.length
+                  ? recyclingRequests
+                      .map(
+                        (r) => `
+                          <tr>
+                            <td>
+                              <strong>${esc(r.productName)}</strong>
+                            </td>
+
+                            <td>${esc(r.id)}</td>
+
+                            <td>
+                              ${esc(r.condition || "Not specified")}
+                            </td>
+
+                            <td>
+                              <span class="badge bg-danger">
+                                ${esc(
+                                  r.status ||
+                                    "Sent to Recycling Partner"
+                                )}
+                              </span>
+                            </td>
+
+                            <td>
+                              <button
+                                type="button"
+                                class="btn btn-sm btn-outline-dark"
+                                onclick="openServiceRequest('${encodeURIComponent(
+                                  r.id
+                                )}')"
+                              >
+                                View Request
+                              </button>
+                            </td>
+                          </tr>
+                        `
+                      )
+                      .join("")
+                  : `
+                    <tr>
+                      <td colspan="5" class="text-center small-muted">
+                        No products sent to recycling.
+                      </td>
+                    </tr>
+                  `
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `,
+    "Sent to Recycling",
+    serviceNav()
+  );
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const page = document.body.dataset.page;
   (
@@ -1636,7 +3329,14 @@ document.addEventListener("DOMContentLoaded", () => {
       recyclingDashboard: initRecyclingDashboard,
       serviceRequest: initServiceRequest,
           assessment: initAssessment,
+          serviceRecord: initServiceRecord,
+          serviceCompleted: initServiceCompleted,
+serviceRecycling: initServiceRecycling,
+          qualityCheck: initQualityCheck,
+          recyclingDashboard: initRecyclingDashboard,
+openRecyclingRequest: openRecyclingRequest,
       salesDashboard: initSalesDashboard,
+
       marketingDashboard: initMarketingDashboard,
     })[page] || initHome
   )();
