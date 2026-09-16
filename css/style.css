@@ -1,0 +1,56 @@
+
+:root {
+  --primary: #343a40;
+  --secondary: #6c757d;
+  --light-bg: #f5f6f8;
+  --border: #e2e5e9;
+}
+body {
+  background: var(--light-bg);
+  color: #212529;
+  font-family: Arial, Helvetica, sans-serif;
+}
+.navbar-brand { font-weight: 700; letter-spacing: .2px; }
+.page-wrapper { min-height: calc(100vh - 72px); }
+.card { border: 1px solid var(--border); border-radius: 12px; }
+.card-header { background: #fff; border-bottom: 1px solid var(--border); }
+.btn-dark { background: var(--primary); border-color: var(--primary); }
+.btn-dark:hover { background: #212529; border-color: #212529; }
+.btn-outline-dark:hover { background: #343a40; }
+.form-control, .form-select { border-radius: 8px; }
+.form-control:focus, .form-select:focus {
+  border-color: #6c757d;
+  box-shadow: 0 0 0 .2rem rgba(108,117,125,.18);
+}
+.hero {
+  background: linear-gradient(135deg, #343a40, #6c757d);
+  color: #fff;
+  border-radius: 16px;
+}
+.product-card { transition: .2s ease; height: 100%; }
+.product-card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+.product-image {
+  height: 180px;
+  background: #e9ecef;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6c757d;
+  font-size: 3rem;
+  border-radius: 12px 12px 0 0;
+}
+.badge-soft { background: #eef0f2; color: #495057; }
+.stat-card { border-left: 4px solid #343a40; }
+.sidebar-link { color: #495057; text-decoration: none; padding: 10px 12px; border-radius: 8px; display: block; }
+.sidebar-link:hover, .sidebar-link.active { background: #e9ecef; color: #212529; }
+.table > :not(caption) > * > * { vertical-align: middle; }
+.small-muted { font-size: .88rem; color: #6c757d; }
+.empty-state { padding: 48px 16px; text-align: center; color: #6c757d; }
+.footer { color: #6c757d; font-size: .9rem; }
+.step { border-left: 3px solid #dee2e6; padding-left: 16px; margin-bottom: 20px; }
+.step.done { border-left-color: #198754; }
+.step.active { border-left-color: #343a40; }
+@media (max-width: 767px) {
+  .hero { border-radius: 10px; }
+  .product-image { height: 140px; }
+}
